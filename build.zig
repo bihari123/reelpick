@@ -37,6 +37,8 @@ pub fn build(b: *std.Build) void {
     });
     // Link the executable with required libraries
     exe.linkSystemLibrary("hiredis");
+    exe.linkSystemLibrary("curl");
+
     exe.linkLibC();
 
     // This declares intent for the executable to be installed into the
