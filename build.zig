@@ -1,5 +1,25 @@
 const std = @import("std");
 
+// Build options for SQLite compilation
+const sqlite_options = [_][]const u8{
+    "-DSQLITE_THREADSAFE=1", // Enable thread safety
+    "-DSQLITE_ENABLE_JSON1", // Enable JSON support
+    "-DSQLITE_ENABLE_RTREE", // Enable R-Tree support
+    "-DSQLITE_ENABLE_FTS5", // Enable Full Text Search
+    "-DSQLITE_ENABLE_UNLOCK_NOTIFY", // Enable unlock notification
+    "-DSQLITE_ENABLE_COLUMN_METADATA", // Enable column metadata access
+    "-DSQLITE_ENABLE_STAT4", // Enable advanced query planner
+    "-DSQLITE_ENABLE_MEMORY_MANAGEMENT", // Enable memory management
+    "-DSQLITE_ENABLE_LOAD_EXTENSION", // Enable loading extensions
+    "-DSQLITE_ENABLE_API_ARMOR", // Enable API armor
+    "-DSQLITE_MAX_VARIABLE_NUMBER=250000", // Increase max variable number
+    "-DSQLITE_MAX_EXPR_DEPTH=10000", // Increase expression depth limit
+    "-DSQLITE_DEFAULT_CACHE_SIZE=-2000", // Set default cache size (2000 pages)
+    "-DSQLITE_DEFAULT_SYNCHRONOUS=1", // Set synchronous mode to NORMAL
+    "-DSQLITE_TEMP_STORE=2", // Store temp tables in memory
+    "-DHAVE_USLEEP=1", // Enable microsecond sleep
+};
+
 // Although this function looks imperative, note that its job is to
 // declaratively construct a build graph that will be executed by an external
 // runner.
@@ -14,6 +34,19 @@ pub fn build(b: *std.Build) void {
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
+    // Create the SQLite static library
+    const sqlite = b.addStaticLibrary(.{
+        .name = "sqlite3",
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // Add SQLite source file with compilation options
+    sqlite.addCSourceFile(.{
+        .file = .{ .cwd_relative = "third_party/sqlite/sqlite3.c" },
+        .flags = &sqlite_options,
+    });
+    sqlite.linkLibC();
 
     const lib = b.addStaticLibrary(.{
         .name = "reelpick",
@@ -38,6 +71,8 @@ pub fn build(b: *std.Build) void {
     // Link the executable with required libraries
     exe.linkSystemLibrary("hiredis");
     exe.linkSystemLibrary("curl");
+    exe.linkLibrary(sqlite);
+    exe.addIncludePath(.{ .cwd_relative = "third_party/sqlite" });
 
     exe.linkLibC();
 
