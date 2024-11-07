@@ -1,51 +1,72 @@
+admin:
+  address:
+    socket_address:
+      address: 0.0.0.0
+      port_value: 9901
 static_resources:
   listeners:
     - name: listener_0
       address:
         socket_address:
           address: 0.0.0.0
-          port_value: 10000
+          port_value: 8080
       filter_chains:
         - filters:
             - name: envoy.filters.network.http_connection_manager
               typed_config:
                 "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
-                stat_prefix: edge
+                stat_prefix: ingress_http
+                access_log:
+                  - name: envoy.access_loggers.stdout
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
                 http_filters:
                   - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+                codec_type: AUTO
                 route_config:
+                  name: local_route
                   virtual_hosts:
-                    - name: all_domains
+                    - name: backend_services
                       domains: ["*"]
                       routes:
                         - match:
-                            prefix: "/blue"
+                            prefix: "/"
                           route:
-                            cluster: blue
-                        - match:
-                            prefix: "/green"
-                          route:
-                            cluster: green
+                            cluster: all_services
+                            timeout: 30s
   clusters:
-    - name: blue
-      connect_timeout: 5s
+    - name: all_services
+      connect_timeout: 30s
+      type: STRICT_DNS # Changed from LOGICAL_DNS
+      dns_lookup_family: V4_ONLY
+      lb_policy: ROUND_ROBIN
       load_assignment:
-        cluster_name: blue
+        cluster_name: all_services
         endpoints:
           - lb_endpoints:
               - endpoint:
                   address:
                     socket_address:
-                      address: 127.0.0.1
-                      port_value: 5050
-    - name: green
-      connect_timeout: 5s
-      load_assignment:
-        cluster_name: green
-        endpoints:
-          - lb_endpoints:
-              - endpoint:
-                  address:
-                    socket_address:
-                      address: 127.0.0.1
+                      address: localhost
                       port_value: 5000
+                  health_check_config:
+                    port_value: 5000
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: localhost
+                      port_value: 5050
+                  health_check_config:
+                    port_value: 5050
+      health_checks:
+        - timeout: 5s
+          interval: 10s
+          unhealthy_threshold: 2
+          healthy_threshold: 1
+          http_health_check:
+            path: "/"
+            expected_statuses:
+              start: 200
+              end: 499
