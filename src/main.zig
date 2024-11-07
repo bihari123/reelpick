@@ -18,8 +18,25 @@ const UploadError = error{
     WriteChunkFailed,
     FinalizeUploadFailed,
     InvalidSession,
+    Unauthorized,
 };
 
+//   API token validation
+const API_TOKENS = struct {
+    const tokens = [_][]const u8{
+        "tk_1234567890abcdef",
+        "tk_0987654321fedcba",
+    };
+
+    pub fn isValid(token: []const u8) bool {
+        for (tokens) |valid_token| {
+            if (std.mem.eql(u8, token, valid_token)) {
+                return true;
+            }
+        }
+        return false;
+    }
+};
 const UploadSession = struct {
     file_id: []const u8,
     file_name: []const u8,
@@ -104,19 +121,55 @@ const UploadEndpoint = struct {
 
         return result;
     }
+
+    fn validateAuth(r: zap.Request) !void {
+        const auth_header = r.getHeader("authorization") orelse { // Note: lowercase key
+            std.debug.print("No authorization header found\n", .{});
+            return UploadError.Unauthorized;
+        };
+
+        std.debug.print("Auth header: {s}\n", .{auth_header});
+
+        if (auth_header.len <= 7 or !std.mem.startsWith(u8, auth_header, "Bearer ")) {
+            std.debug.print("Invalid authorization format\n", .{});
+            return UploadError.Unauthorized;
+        }
+
+        const token = auth_header[7..];
+        std.debug.print("Token: {s}\n", .{token});
+
+        if (!API_TOKENS.isValid(token)) {
+            std.debug.print("Invalid token\n", .{});
+            return UploadError.Unauthorized;
+        }
+    }
+
     fn addCorsHeaders(r: zap.Request) !void {
         try r.setHeader("Access-Control-Allow-Origin", "*");
         try r.setHeader("Access-Control-Allow-Methods", "POST, PUT, OPTIONS");
-        try r.setHeader("Access-Control-Allow-Headers", "Content-Type, X-File-Id, X-Chunk-Index");
+        try r.setHeader("Access-Control-Allow-Headers", "Content-Type, X-File-Id, X-Chunk-Index, Accept, Authorization"); // Added Accept and Authorization
+        try r.setHeader("Access-Control-Expose-Headers", "Authorization");
     }
+
     fn handleOptions(ep: *zap.Endpoint, r: zap.Request) void {
         _ = ep;
         addCorsHeaders(r) catch return;
+        r.setHeader("Access-Control-Expose-Headers", "Authorization") catch return;
         r.setStatus(.no_content);
         r.markAsFinished(true);
     }
     fn handleInitialize(ep: *zap.Endpoint, r: zap.Request) void {
         addCorsHeaders(r) catch return;
+
+        // Add authentication check
+        validateAuth(r) catch |err| {
+            if (err == UploadError.Unauthorized) {
+                sendErrorJson(r, UploadError.Unauthorized, 401);
+                return;
+            }
+            r.sendError(err, null, 500);
+            return;
+        };
 
         const self: *UploadEndpoint = @fieldParentPtr("ep_initialize", ep);
 
@@ -306,6 +359,7 @@ const UploadEndpoint = struct {
             UploadError.WriteChunkFailed => "Failed to write chunk",
             UploadError.FinalizeUploadFailed => "Failed to finalize upload",
             UploadError.InvalidSession => "Invalid session",
+            UploadError.Unauthorized => "Unauthorized: Invalid or missing API token",
         };
 
         // Create JSON string manually since we have a simple structure
