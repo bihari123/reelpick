@@ -1,118 +1,388 @@
 const std = @import("std");
 const zap = @import("zap");
+const redis_helper = @import("redis_helper.zig");
 
-// File upload settings
 const UPLOAD_DIR = "uploads";
-const MAX_FILE_SIZE = 1000 * 1024 * 1024; // 500MB
+const MAX_FILE_SIZE = 1000 * 1024 * 1024; // 1GB
+const CHUNK_SIZE = 1 * 1024 * 1024; // 1MB
 
 const UploadError = error{
     InvalidRequestBody,
     FileTooLarge,
     FileIdGenerationFailed,
     CreateSessionFailed,
-    StoreSessionFailed,
     MissingFileId,
     MissingChunkIndex,
     MissingChunkData,
     FileSizeExceeded,
     WriteChunkFailed,
-    FinalizeUploadFailed,
     InvalidSession,
     Unauthorized,
 };
 
-//   API token validation
-const API_TOKENS = struct {
-    const tokens = [_][]const u8{
-        "tk_1234567890abcdef",
-        "tk_0987654321fedcba",
-    };
-
-    pub fn isValid(token: []const u8) bool {
-        for (tokens) |valid_token| {
-            if (std.mem.eql(u8, token, valid_token)) {
-                return true;
-            }
-        }
-        return false;
-    }
-};
-const UploadSession = struct {
+const ChunkJob = struct {
     file_id: []const u8,
-    file_name: []const u8,
-    total_size: usize,
-    uploaded_size: usize,
-    file: std.fs.File,
-    last_activity: i64,
+    chunk_index: usize,
+    chunk_size: usize,
+    total_chunks: usize,
+    chunk_data: []const u8,
 
-    pub fn init(alloc: std.mem.Allocator, file_id: []const u8, file_name: []const u8, total_size: usize) !UploadSession {
-        // Create a safe file path by joining directory and file_id
-        //var path_buffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-        const file_path = try std.fs.path.join(alloc, &[_][]const u8{ UPLOAD_DIR, file_id });
-        defer alloc.free(file_path);
+    pub fn toJson(self: ChunkJob, allocator: std.mem.Allocator) ![]const u8 {
+        return std.json.stringifyAlloc(allocator, .{
+            .file_id = self.file_id,
+            .chunk_index = self.chunk_index,
+            .chunk_size = self.chunk_size,
+            .total_chunks = self.total_chunks,
+        }, .{});
+    }
 
-        const file = try std.fs.cwd().createFile(file_path, .{});
+    pub fn fromJson(json: []const u8, allocator: std.mem.Allocator) !ChunkJob {
+        const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json, .{});
+        defer parsed.deinit();
 
-        return UploadSession{
-            .file_id = try alloc.dupe(u8, file_id),
-            .file_name = try alloc.dupe(u8, file_name),
-            .total_size = total_size,
-            .uploaded_size = 0,
-            .file = file,
-            .last_activity = std.time.timestamp(),
+        return ChunkJob{
+            .file_id = try allocator.dupe(u8, parsed.value.object.get("file_id").?.string),
+            .chunk_index = @intCast(parsed.value.object.get("chunk_index").?.integer),
+            .chunk_size = @intCast(parsed.value.object.get("chunk_size").?.integer),
+            .total_chunks = @intCast(parsed.value.object.get("total_chunks").?.integer),
+            .chunk_data = undefined, // Set during processing
         };
     }
-
-    pub fn deinit(self: *UploadSession, alloc: std.mem.Allocator) void {
-        self.file.close();
-        alloc.free(self.file_id);
-        alloc.free(self.file_name);
-    }
 };
 
-const UploadEndpoint = struct {
-    alloc: std.mem.Allocator,
-    sessions: std.StringHashMap(UploadSession),
-    lock: std.Thread.Mutex,
-    ep_initialize: zap.Endpoint,
-    ep_chunk: zap.Endpoint,
+const UploadServer = struct {
+    allocator: std.mem.Allocator,
+    job_queue: *redis_helper.RedisJobQueue,
+    listener: *zap.Endpoint.Listener,
+    port: u16,
 
-    pub fn init(alloc: std.mem.Allocator) !UploadEndpoint {
+    pub fn init(allocator: std.mem.Allocator, port: u16) !*UploadServer {
+        // Initialize Redis job queue
+        const job_queue = try redis_helper.RedisJobQueue.init(allocator, "localhost", 6379, 3);
+
+        // Create upload directory
         try std.fs.cwd().makePath(UPLOAD_DIR);
 
-        return UploadEndpoint{
-            .alloc = alloc,
-            .sessions = std.StringHashMap(UploadSession).init(alloc),
-            .lock = .{},
-            .ep_initialize = zap.Endpoint.init(.{
-                .path = "/api/upload/initialize",
-                .post = handleInitialize,
-                .options = handleOptions,
-            }),
-            .ep_chunk = zap.Endpoint.init(.{
-                .path = "/api/upload/chunk",
-                .post = handleChunk,
-                .options = handleOptions,
-            }),
+        // Initialize HTTP listener
+        var listener = try zap.Endpoint.Listener.init(allocator, .{
+            .port = port,
+            .on_request = null,
+            .log = true,
+            .max_body_size = MAX_FILE_SIZE,
+        });
+
+        const server = try allocator.create(UploadServer);
+        server.* = .{
+            .allocator = allocator,
+            .job_queue = job_queue,
+            .listener = listener,
+            .port = port,
         };
-    }
 
-    pub fn deinit(self: *UploadEndpoint) void {
-        var it = self.sessions.iterator();
-        while (it.next()) |entry| {
-            entry.value_ptr.deinit(self.alloc);
+        // Register endpoints
+        try listener.register(&(try zap.Endpoint.create(.{
+            .path = "/api/upload/initialize",
+            .post = handleInitialize,
+            .userdata = server,
+        })));
+
+        try listener.register(&(try zap.Endpoint.create(.{
+            .path = "/api/upload/chunk",
+            .post = handleChunk,
+            .userdata = server,
+        })));
+
+        try listener.register(&(try zap.Endpoint.create(.{
+            .path = "/api/upload/status",
+            .get = handleStatus,
+            .userdata = server,
+        })));
+
+        // Start chunk processing workers
+        const worker_count = 4;
+        var i: usize = 0;
+        while (i < worker_count) : (i += 1) {
+            try std.Thread.spawn(.{}, processChunks, .{server});
         }
-        self.sessions.deinit();
+
+        return server;
     }
 
-    fn generateFileId(alloc: std.mem.Allocator) ![]const u8 {
-        // Generate a UUID-style identifier
+    pub fn start(self: *UploadServer) !void {
+        try self.listener.listen();
+        std.debug.print("Server listening on port {d}\n", .{self.port});
+
+        zap.start(.{
+            .threads = 4,
+            .workers = 1,
+        });
+    }
+
+    pub fn deinit(self: *UploadServer) void {
+        self.job_queue.deinit();
+        self.listener.deinit();
+        self.allocator.destroy(self);
+    }
+
+    fn handleInitialize(e: *zap.Endpoint, r: zap.Request) void {
+        const server = @ptrCast(*UploadServer, @alignCast(@alignOf(*UploadServer), e.userdata));
+        
+        if (r.body) |body| {
+            const parsed = std.json.parseFromSlice(struct {
+                fileName: []const u8,
+                fileSize: usize,
+            }, server.allocator, body, .{}) catch {
+                sendErrorJson(r, UploadError.InvalidRequestBody, 400);
+                return;
+            };
+            defer parsed.deinit();
+
+            const init_data = parsed.value;
+            if (init_data.fileSize > MAX_FILE_SIZE) {
+                sendErrorJson(r, UploadError.FileTooLarge, 400);
+                return;
+            }
+
+            const file_id = generateFileId(server.allocator) catch {
+                sendErrorJson(r, UploadError.FileIdGenerationFailed, 500);
+                return;
+            };
+
+            const total_chunks = (init_data.fileSize + CHUNK_SIZE - 1) / CHUNK_SIZE;
+
+            // Create file metadata
+            const metadata = redis_helper.FileMetadata{
+                .file_id = file_id,
+                .file_name = init_data.fileName,
+                .total_size = init_data.fileSize,
+                .total_chunks = total_chunks,
+                .completed_chunks = 0,
+                .upload_status = .pending,
+            };
+
+            server.job_queue.storeFileMetadata(metadata) catch {
+                sendErrorJson(r, redis_helper.JobError.InvalidMetadata, 500);
+                return;
+            };
+
+            // Send response
+            const response = .{
+                .fileId = file_id,
+                .fileName = init_data.fileName,
+                .fileSize = init_data.fileSize,
+                .chunkSize = CHUNK_SIZE,
+                .totalChunks = total_chunks,
+            };
+
+            r.sendJson(response) catch return;
+        }
+    }
+
+    fn handleChunk(e: *zap.Endpoint, r: zap.Request) void {
+        const server = @ptrCast(*UploadServer, @alignCast(@alignOf(*UploadServer), e.userdata));
+
+        const file_id = r.getHeader("x-file-id") orelse {
+            sendErrorJson(r, UploadError.MissingFileId, 400);
+            return;
+        };
+
+        const chunk_index = r.getHeader("x-chunk-index") orelse {
+            sendErrorJson(r, UploadError.MissingChunkIndex, 400);
+            return;
+        };
+
+        const chunk_data = r.body orelse {
+            sendErrorJson(r, UploadError.MissingChunkData, 400);
+            return;
+        };
+
+        // Get file metadata
+        const metadata = server.job_queue.getFileMetadata(file_id) catch |err| {
+            sendErrorJson(r, err, 500);
+            return;
+        } orelse {
+            sendErrorJson(r, redis_helper.JobError.InvalidMetadata, 400);
+            return;
+        };
+
+        // Create and queue chunk job
+        const chunk_index_num = std.fmt.parseInt(usize, chunk_index, 10) catch {
+            sendErrorJson(r, UploadError.InvalidRequestBody, 400);
+            return;
+        };
+
+        const chunk_job = ChunkJob{
+            .file_id = file_id,
+.chunk_index = chunk_index_num,
+            .chunk_size = chunk_data.len,
+            .total_chunks = metadata.total_chunks,
+            .chunk_data = chunk_data,
+        };
+
+        // Convert to job and queue it
+        const job_data = chunk_job.toJson(server.allocator) catch {
+            sendErrorJson(r, redis_helper.JobError.InvalidJobData, 500);
+            return;
+        };
+        defer server.allocator.free(job_data);
+
+        const job = redis_helper.Job.init(
+            server.allocator, 
+            file_id, 
+            .chunk_upload,
+            job_data
+        ) catch {
+            sendErrorJson(r, redis_helper.JobError.InvalidJobData, 500);
+            return;
+        };
+        defer job.deinit();
+
+        server.job_queue.pushJob(job) catch {
+            sendErrorJson(r, redis_helper.JobError.QueueFull, 500);
+            return;
+        };
+
+        // Calculate current progress
+        const progress = server.job_queue.getUploadProgress(file_id) catch |err| {
+            sendErrorJson(r, err, 500);
+            return;
+        } orelse {
+            sendErrorJson(r, redis_helper.JobError.InvalidMetadata, 400);
+            return;
+        };
+
+        const response = .{
+            .received = true,
+            .status = "processing",
+            .progress = @floatToInt(u8, (@intToFloat(f32, progress.completed) / @intToFloat(f32, progress.total)) * 100),
+            .chunksReceived = progress.completed,
+            .totalChunks = progress.total,
+            .message = "chunk queued for processing",
+        };
+
+        r.sendJson(response) catch return;
+    }
+
+    fn handleStatus(e: *zap.Endpoint, r: zap.Request) void {
+        const server = @ptrCast(*UploadServer, @alignCast(@alignOf(*UploadServer), e.userdata));
+
+        const file_id = r.getHeader("x-file-id") orelse {
+            sendErrorJson(r, UploadError.MissingFileId, 400);
+            return;
+        };
+
+        const metadata = server.job_queue.getFileMetadata(file_id) catch |err| {
+            sendErrorJson(r, err, 500);
+            return;
+        } orelse {
+            sendErrorJson(r, redis_helper.JobError.InvalidMetadata, 400);
+            return;
+        };
+
+        const progress = @floatToInt(u8, (@intToFloat(f32, metadata.completed_chunks) / @intToFloat(f32, metadata.total_chunks)) * 100);
+
+        const response = .{
+            .fileId = metadata.file_id,
+            .fileName = metadata.file_name,
+            .status = @tagName(metadata.upload_status),
+            .progress = progress,
+            .completedChunks = metadata.completed_chunks,
+            .totalChunks = metadata.total_chunks,
+            .totalSize = metadata.total_size,
+        };
+
+        r.sendJson(response) catch return;
+    }
+
+    fn processChunks(server: *UploadServer) !void {
+        while (true) {
+            if (try server.job_queue.getNextJob()) |job| {
+                if (job.job_type == .chunk_upload) {
+                    const chunk_job = try ChunkJob.fromJson(job.data, server.allocator);
+                    
+                    // Create chunk directory
+                    const chunk_dir = try std.fs.path.join(server.allocator, 
+                        &[_][]const u8{ UPLOAD_DIR, chunk_job.file_id });
+                    defer server.allocator.free(chunk_dir);
+                    
+                    try std.fs.cwd().makePath(chunk_dir);
+                    
+                    // Write chunk to file
+                    const chunk_filename = try std.fmt.allocPrint(server.allocator, 
+                        "chunk_{d}", .{chunk_job.chunk_index});
+                    defer server.allocator.free(chunk_filename);
+                    
+                    const chunk_path = try std.fs.path.join(server.allocator,
+                        &[_][]const u8{ chunk_dir, chunk_filename });
+                    defer server.allocator.free(chunk_path);
+                    
+                    const chunk_file = try std.fs.createFileAbsolute(chunk_path, .{});
+                    defer chunk_file.close();
+                    
+                    try chunk_file.writeAll(chunk_job.chunk_data);
+                    
+                    // Update job status
+                    try server.job_queue.updateJobStatus(job.id, .completed);
+                    try server.job_queue.updateChunkStatus(chunk_job.file_id, chunk_job.chunk_index, true);
+                    
+                    // Check if all chunks are complete
+                    if (try server.job_queue.getFileMetadata(chunk_job.file_id)) |metadata| {
+                        if (metadata.completed_chunks == metadata.total_chunks) {
+                            try assembleFile(server, metadata);
+                        }
+                    }
+                }
+                job.deinit();
+            }
+            
+            std.time.sleep(100 * std.time.ns_per_ms);
+        }
+    }
+
+    fn assembleFile(server: *UploadServer, metadata: redis_helper.FileMetadata) !void {
+        const final_path = try std.fs.path.join(server.allocator,
+            &[_][]const u8{ UPLOAD_DIR, metadata.file_name });
+        defer server.allocator.free(final_path);
+
+        const final_file = try std.fs.createFileAbsolute(final_path, .{});
+        defer final_file.close();
+
+        const chunk_dir = try std.fs.path.join(server.allocator,
+            &[_][]const u8{ UPLOAD_DIR, metadata.file_id });
+        defer server.allocator.free(chunk_dir);
+
+        var i: usize = 0;
+        while (i < metadata.total_chunks) : (i += 1) {
+            const chunk_filename = try std.fmt.allocPrint(server.allocator,
+                "chunk_{d}", .{i});
+            defer server.allocator.free(chunk_filename);
+
+            const chunk_path = try std.fs.path.join(server.allocator,
+                &[_][]const u8{ chunk_dir, chunk_filename });
+            defer server.allocator.free(chunk_path);
+
+            const chunk_file = try std.fs.openFileAbsolute(chunk_path, .{});
+            defer chunk_file.close();
+
+            var buffer: [8192]u8 = undefined;
+            while (true) {
+                const bytes_read = try chunk_file.read(&buffer);
+                if (bytes_read == 0) break;
+                try final_file.writeAll(buffer[0..bytes_read]);
+            }
+        }
+
+        // Clean up chunk directory
+        try std.fs.deleteTreeAbsolute(chunk_dir);
+    }
+
+    fn generateFileId(allocator: std.mem.Allocator) ![]const u8 {
         var random_bytes: [16]u8 = undefined;
         std.crypto.random.bytes(&random_bytes);
 
-        // Convert to hex string
         const hex = "0123456789abcdef";
-        var result = try alloc.alloc(u8, 32);
+        var result = try allocator.alloc(u8, 32);
+        errdefer allocator.free(result);
 
         for (random_bytes, 0..) |byte, i| {
             result[i * 2] = hex[byte >> 4];
@@ -121,289 +391,54 @@ const UploadEndpoint = struct {
 
         return result;
     }
-
-    fn validateAuth(r: zap.Request) !void {
-        const auth_header = r.getHeader("authorization") orelse { // Note: lowercase key
-            std.debug.print("No authorization header found\n", .{});
-            return UploadError.Unauthorized;
-        };
-
-        std.debug.print("Auth header: {s}\n", .{auth_header});
-
-        if (auth_header.len <= 7 or !std.mem.startsWith(u8, auth_header, "Bearer ")) {
-            std.debug.print("Invalid authorization format\n", .{});
-            return UploadError.Unauthorized;
-        }
-
-        const token = auth_header[7..];
-        std.debug.print("Token: {s}\n", .{token});
-
-        if (!API_TOKENS.isValid(token)) {
-            std.debug.print("Invalid token\n", .{});
-            return UploadError.Unauthorized;
-        }
-    }
-
-    fn addCorsHeaders(r: zap.Request) !void {
-        try r.setHeader("Access-Control-Allow-Origin", "*");
-        try r.setHeader("Access-Control-Allow-Methods", "POST, PUT, OPTIONS");
-        try r.setHeader("Access-Control-Allow-Headers", "Content-Type, X-File-Id, X-Chunk-Index, Accept, Authorization"); // Added Accept and Authorization
-        try r.setHeader("Access-Control-Expose-Headers", "Authorization");
-    }
-
-    fn handleOptions(ep: *zap.Endpoint, r: zap.Request) void {
-        _ = ep;
-        addCorsHeaders(r) catch return;
-        r.setHeader("Access-Control-Expose-Headers", "Authorization") catch return;
-        r.setStatus(.no_content);
-        r.markAsFinished(true);
-    }
-    fn handleInitialize(ep: *zap.Endpoint, r: zap.Request) void {
-        addCorsHeaders(r) catch return;
-
-        // Add authentication check
-        validateAuth(r) catch |err| {
-            if (err == UploadError.Unauthorized) {
-                sendErrorJson(r, UploadError.Unauthorized, 401);
-                return;
-            }
-            r.sendError(err, null, 500);
-            return;
-        };
-
-        const self: *UploadEndpoint = @fieldParentPtr("ep_initialize", ep);
-
-        if (r.body) |body| {
-            const parsed = std.json.parseFromSlice(struct {
-                fileName: []const u8,
-                fileSize: usize,
-                totalChunks: usize,
-            }, self.alloc, body, .{}) catch {
-                r.sendError(UploadError.InvalidRequestBody, null, 400);
-                return;
-            };
-            defer parsed.deinit();
-
-            const init_data = parsed.value;
-
-            if (init_data.fileSize > MAX_FILE_SIZE) {
-                r.sendError(UploadError.FileTooLarge, null, 400);
-                return;
-            }
-
-            const file_id = generateFileId(self.alloc) catch {
-                r.sendError(UploadError.FileIdGenerationFailed, null, 500);
-                return;
-            };
-            defer self.alloc.free(file_id);
-
-            self.lock.lock();
-            defer self.lock.unlock();
-
-            const session = UploadSession.init(self.alloc, file_id, init_data.fileName, init_data.fileSize) catch {
-                r.sendError(UploadError.CreateSessionFailed, null, 500);
-                return;
-            };
-
-            self.sessions.put(session.file_id, session) catch {
-                r.sendError(UploadError.StoreSessionFailed, null, 500);
-                return;
-            };
-
-            // Prepare response
-            r.setHeader("Content-Type", "application/json") catch return;
-            const response = .{
-                .fileId = session.file_id,
-                .fileName = session.file_name,
-                .fileSize = session.total_size,
-            };
-
-            var json_buf: [1024]u8 = undefined;
-            const json = zap.stringifyBuf(&json_buf, response, .{}) orelse {
-                r.sendError(UploadError.InvalidRequestBody, null, 500);
-                return;
-            };
-            r.sendBody(json) catch return;
-        }
-    }
-
-    fn handleChunk(ep: *zap.Endpoint, r: zap.Request) void {
-        addCorsHeaders(r) catch return;
-
-        const self: *UploadEndpoint = @fieldParentPtr("ep_chunk", ep);
-
-        std.debug.print("\n=== Request Headers ===\n", .{});
-
-        // Create our header print callback
-        const PrintContext = struct {
-            fn printHeader(fiobj_value: zap.fio.FIOBJ, context: ?*anyopaque) callconv(.C) c_int {
-                _ = context;
-                // Get the header key (this is thread-safe, guaranteed by fio)
-                const fiobj_key = zap.fio.fiobj_hash_key_in_loop();
-
-                if (zap.fio2str(fiobj_key)) |key| {
-                    if (zap.fio2str(fiobj_value)) |value| {
-                        std.debug.print("{s}: {s}\n", .{ key, value });
-                    }
-                }
-                return 0;
-            }
-        };
-
-        // Iterate through all headers using fio.fiobj_each1
-        _ = zap.fio.fiobj_each1(r.h.*.headers, 0, PrintContext.printHeader, null);
-
-        const file_id = r.getHeader("x-file-id") orelse {
-            // r.sendError(UploadError.MissingFileId, null, 400);
-            sendErrorJson(r, UploadError.MissingFileId, 400);
-
-            return;
-        };
-
-        const chunk_index = r.getHeader("x-chunk-index") orelse {
-            //r.sendError(UploadError.MissingChunkIndex, null, 400);
-            sendErrorJson(r, UploadError.MissingChunkIndex, 400);
-
-            return;
-        };
-
-        const chunk_data = r.body orelse {
-            // r.sendError(UploadError.MissingChunkData, null, 400);
-            sendErrorJson(r, UploadError.MissingChunkData, 400);
-
-            return;
-        };
-        std.debug.print("FIleId: {s}, chunk_index {u}", .{ file_id, chunk_index });
-        self.lock.lock();
-        defer self.lock.unlock();
-
-        if (self.sessions.getPtr(file_id)) |session| {
-            if (session.uploaded_size + chunk_data.len > session.total_size) {
-                // r.sendError(UploadError.FileSizeExceeded, null, 400);
-                sendErrorJson(r, UploadError.FileSizeExceeded, 400);
-                return;
-            }
-
-            session.file.writeAll(chunk_data) catch {
-                r.sendError(UploadError.WriteChunkFailed, null, 500);
-                return;
-            };
-
-            session.uploaded_size += chunk_data.len;
-            session.last_activity = std.time.timestamp();
-
-            const progress = @as(f32, @floatFromInt(session.uploaded_size)) /
-                @as(f32, @floatFromInt(session.total_size)) * 100.0;
-
-            const response = .{
-                .received = true,
-                .status = if (progress < 30) "analyzing" else if (progress < 60) "processing" else if (progress < 100) "finalizing" else "done",
-                .progress = @as(u8, @intFromFloat(progress)),
-                .uploadedSize = session.uploaded_size,
-                .totalSize = session.total_size,
-                .message = "chunk upload successful",
-            };
-
-            var json_buf: [1024]u8 = undefined;
-            const json = zap.stringifyBuf(&json_buf, response, .{}) orelse {
-                r.sendError(UploadError.InvalidRequestBody, null, 500);
-                return;
-            };
-
-            if (session.uploaded_size >= session.total_size) {
-                const cwd = std.fs.cwd();
-
-                const src_path = std.fs.path.join(self.alloc, &[_][]const u8{ UPLOAD_DIR, session.file_id }) catch {
-                    r.sendError(UploadError.FinalizeUploadFailed, null, 500);
-                    return;
-                };
-                defer self.alloc.free(src_path);
-
-                const dst_path = std.fs.path.join(self.alloc, &[_][]const u8{ UPLOAD_DIR, session.file_name }) catch {
-                    r.sendError(UploadError.FinalizeUploadFailed, null, 500);
-                    return;
-                };
-                defer self.alloc.free(dst_path);
-
-                std.fs.rename(cwd, src_path, cwd, dst_path) catch {
-                    r.sendError(UploadError.FinalizeUploadFailed, null, 500);
-                    return;
-                };
-
-                _ = self.sessions.remove(file_id);
-                //   session.deinit(self.alloc);
-            }
-
-            r.sendJson(json) catch return;
-        } else {
-            r.sendError(UploadError.InvalidSession, null, 400);
-            return;
-        }
-    }
-    fn sendErrorJson(r: zap.Request, err: UploadError, code: u16) void {
-        // Set headers first
-        r.setStatus(@enumFromInt(code));
-        r.setHeader("Content-Type", "application/json") catch return;
-
-        // Build error response based on the error type
-        const error_msg: []const u8 = switch (err) {
-            UploadError.InvalidRequestBody => "Invalid request body",
-            UploadError.FileTooLarge => "File too large",
-            UploadError.FileIdGenerationFailed => "Failed to generate file ID",
-            UploadError.CreateSessionFailed => "Failed to create upload session",
-            UploadError.StoreSessionFailed => "Failed to store session",
-            UploadError.MissingFileId => "Missing file ID",
-            UploadError.MissingChunkIndex => "Missing chunk index",
-            UploadError.MissingChunkData => "Missing chunk data",
-            UploadError.FileSizeExceeded => "File size exceeded",
-            UploadError.WriteChunkFailed => "Failed to write chunk",
-            UploadError.FinalizeUploadFailed => "Failed to finalize upload",
-            UploadError.InvalidSession => "Invalid session",
-            UploadError.Unauthorized => "Unauthorized: Invalid or missing API token",
-        };
-
-        // Create JSON string manually since we have a simple structure
-        var buf: [256]u8 = undefined;
-        const json = std.fmt.bufPrint(&buf, "{{\"status\":\"error\",\"error\":\"{s}\",\"code\":{d}}}", .{ error_msg, code }) catch {
-            r.sendBody("{\"status\":\"error\",\"error\":\"Error formatting response\",\"code\":500}") catch return;
-            return;
-        };
-
-        r.sendBody(json) catch return;
-    }
-
-    pub fn endpoints(self: *UploadEndpoint) [2]*zap.Endpoint {
-        return .{ &self.ep_initialize, &self.ep_chunk };
-    }
 };
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{
-        .thread_safe = true,
-    }){};
+    var gpa = std.heap.GeneralPurposeAllocator(.{ .thread_safe = true }){};
     const allocator = gpa.allocator();
 
-    var upload_endpoint = try UploadEndpoint.init(allocator);
-    defer upload_endpoint.deinit();
+    const args = try std.process.argsAlloc(allocator);
+    defer std.process.argsFree(allocator, args);
 
-    var listener = zap.Endpoint.Listener.init(allocator, .{
-        .port = 8080,
-        .on_request = null,
-        .log = true,
-        .max_body_size = MAX_FILE_SIZE,
-    });
-
-    // Register both endpoints
-    for (upload_endpoint.endpoints()) |ep| {
-        try listener.register(ep);
+    var port: u16 = 8080;
+    if (args.len > 1) {
+        port = try std.fmt.parseInt(u16, args[1], 10);
     }
 
-    try listener.listen();
+    // Check Redis connection first
+    try redis_helper.checkRedisConnection();
 
-    std.debug.print("Listening on 0.0.0.0:8080\n", .{});
+    var server = try UploadServer.init(allocator, port);
+    defer server.deinit();
 
-    zap.start(.{
-        .threads = 4,
-        .workers = 1,
-    });
+    try server.start();
+}
+
+fn sendErrorJson(r: zap.Request, err: anyerror, code: u16) void {
+    r.setStatus(@intToEnum(std.http.Status, code));
+    
+    const error_msg = switch (err) {
+        UploadError.InvalidRequestBody => "Invalid request body",
+        UploadError.FileTooLarge => "File too large",
+        UploadError.FileIdGenerationFailed => "Failed to generate file ID",
+        UploadError.CreateSessionFailed => "Failed to create upload session",
+        UploadError.MissingFileId => "Missing file ID",
+        UploadError.MissingChunkIndex => "Missing chunk index",
+        UploadError.MissingChunkData => "Missing chunk data",
+        UploadError.FileSizeExceeded => "File size exceeded",
+        UploadError.WriteChunkFailed => "Failed to write chunk",
+        UploadError.InvalidSession => "Invalid session",
+        UploadError.Unauthorized => "Unauthorized",
+        redis_helper.JobError.InvalidMetadata => "Invalid file metadata",
+        redis_helper.JobError.InvalidJobData => "Invalid job data",
+        redis_helper.JobError.QueueFull => "Upload queue is full",
+        else => "Internal server error",
+    };
+
+    const response = .{
+        .error = error_msg,
+        .code = code,
+    };
+
+    r.sendJson(response) catch return;
 }

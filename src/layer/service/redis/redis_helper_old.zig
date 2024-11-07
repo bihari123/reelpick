@@ -17,29 +17,20 @@ pub const JobError = error{
     JobNotFound,
     QueueFull,
     RedisError,
-    InvalidMetadata,
-    ChunkProcessingError,
-};
-
-pub const JobType = enum {
-    chunk_upload,
-    file_metadata,
 };
 
 pub const Job = struct {
     id: []const u8,
-    job_type: JobType,
     data: []const u8,
     status: JobStatus,
     created_at: i64,
     updated_at: i64,
     allocator: std.mem.Allocator,
 
-    pub fn init(allocator: std.mem.Allocator, id: []const u8, job_type: JobType, data: []const u8) !*Job {
+    pub fn init(allocator: std.mem.Allocator, id: []const u8, data: []const u8) !*Job {
         const job = try allocator.create(Job);
         job.* = .{
             .id = try allocator.dupe(u8, id),
-            .job_type = job_type,
             .data = try allocator.dupe(u8, data),
             .status = .pending,
             .created_at = std.time.timestamp(),
@@ -55,75 +46,7 @@ pub const Job = struct {
         self.allocator.destroy(self);
     }
 };
-pub const FileMetadata = struct {
-    file_id: []const u8,
-    file_name: []const u8,
-    total_size: usize,
-    total_chunks: usize,
-    completed_chunks: usize,
-    upload_status: JobStatus,
-    chunk_status: std.AutoHashMap(usize, bool), // Track individual chunks
 
-    pub fn init(allocator: std.mem.Allocator) !FileMetadata {
-        return FileMetadata{
-            .file_id = undefined,
-            .file_name = undefined,
-            .total_size = 0,
-            .total_chunks = 0,
-            .completed_chunks = 0,
-            .upload_status = .pending,
-            .chunk_status = std.AutoHashMap(usize, bool).init(allocator),
-        };
-    }
-
-    pub fn deinit(self: *FileMetadata) void {
-        self.chunk_status.deinit();
-    }
-
-    pub fn toJson(self: FileMetadata, allocator: std.mem.Allocator) ![]const u8 {
-        var chunk_array = std.ArrayList(usize).init(allocator);
-        defer chunk_array.deinit();
-
-        var chunk_it = self.chunk_status.iterator();
-        while (chunk_it.next()) |entry| {
-            if (entry.value_ptr.*) {
-                try chunk_array.append(entry.key_ptr.*);
-            }
-        }
-
-        return std.json.stringifyAlloc(allocator, .{
-            .file_id = self.file_id,
-            .file_name = self.file_name,
-            .total_size = self.total_size,
-            .total_chunks = self.total_chunks,
-            .completed_chunks = self.completed_chunks,
-            .upload_status = @tagName(self.upload_status),
-            .completed_chunk_indices = chunk_array.items,
-        }, .{});
-    }
-
-    pub fn fromJson(json: []const u8, allocator: std.mem.Allocator) !FileMetadata {
-        const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json, .{});
-        defer parsed.deinit();
-
-        var metadata = try FileMetadata.init(allocator);
-        metadata.file_id = try allocator.dupe(u8, parsed.value.object.get("file_id").?.string);
-        metadata.file_name = try allocator.dupe(u8, parsed.value.object.get("file_name").?.string);
-        metadata.total_size = @intCast(parsed.value.object.get("total_size").?.integer);
-        metadata.total_chunks = @intCast(parsed.value.object.get("total_chunks").?.integer);
-        metadata.completed_chunks = @intCast(parsed.value.object.get("completed_chunks").?.integer);
-        metadata.upload_status = std.meta.stringToEnum(JobStatus, parsed.value.object.get("upload_status").?.string) orelse .pending;
-
-        // Restore chunk status
-        if (parsed.value.object.get("completed_chunk_indices")) |indices| {
-            for (indices.array.items) |index| {
-                try metadata.chunk_status.put(@intCast(index.integer), true);
-            }
-        }
-
-        return metadata;
-    }
-};
 pub const RedisJobQueue = struct {
     context: ?*c.redisContext,
     allocator: std.mem.Allocator,
@@ -132,25 +55,29 @@ pub const RedisJobQueue = struct {
 
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, host: []const u8, port: u16, max_retries: u32) !*RedisJobQueue {
-        const self = try allocator.create(RedisJobQueue);
+    pub fn init(allocator: std.mem.Allocator, host: []const u8, port: u16, max_retries: u32) !*Self {
+        std.debug.print("Initializing Redis Job Queue...\n", .{});
+
+        const self = try allocator.create(Self);
         self.* = .{
             .context = null,
             .allocator = allocator,
-            .mutex = .{},
+            .mutex = std.Thread.Mutex{},
             .max_retries = max_retries,
         };
 
         try self.connect(host, port);
+        std.debug.print("Redis Job Queue initialized successfully\n", .{});
         return self;
     }
 
-    pub fn deinit(self: *RedisJobQueue) void {
+    pub fn deinit(self: *Self) void {
         if (self.context) |ctx| {
             c.redisFree(ctx);
         }
         self.allocator.destroy(self);
     }
+
     fn connect(self: *Self, host: []const u8, port: u16) !void {
         std.debug.print("Connecting to Redis at {s}:{d}...\n", .{ host, port });
 
@@ -206,108 +133,7 @@ pub const RedisJobQueue = struct {
         }
         return JobError.CommandFailed;
     }
-    pub fn storeFileMetadata(self: *RedisJobQueue, metadata: FileMetadata) !void {
-        const json = try metadata.toJson(self.allocator);
-        defer self.allocator.free(json);
 
-        var key_buf: [256]u8 = undefined;
-        const key = try std.fmt.bufPrintZ(&key_buf, "file_metadata:{s}", .{metadata.file_id});
-
-        var cmd_buf: [1024]u8 = undefined;
-        const cmd = try std.fmt.bufPrintZ(&cmd_buf, "SET {s} {s}", .{ key, json });
-
-        if (self.context) |ctx| {
-            const reply = try self.redisCmd(ctx, cmd.ptr);
-            if (reply) |r| {
-                defer c.freeReplyObject(r);
-            }
-        }
-    }
-    pub fn getFileMetadata(self: *RedisJobQueue, file_id: []const u8) !?FileMetadata {
-        var key_buf: [256]u8 = undefined;
-        const key = try std.fmt.bufPrintZ(&key_buf, "file_metadata:{s}", .{file_id});
-
-        if (self.context) |ctx| {
-            var cmd_buf: [512]u8 = undefined;
-            const cmd = try std.fmt.bufPrintZ(&cmd_buf, "GET {s}", .{key});
-
-            const reply = try self.redisCmd(ctx, cmd.ptr);
-            if (reply) |r| {
-                defer c.freeReplyObject(r);
-                if (r.type == c.REDIS_REPLY_STRING) {
-                    const json = r.str[0..@intCast(r.len)];
-                    return try FileMetadata.fromJson(json, self.allocator);
-                }
-            }
-        }
-        return null;
-    }
-
-    pub fn updateChunkStatus(self: *RedisJobQueue, file_id: []const u8, chunk_index: usize, completed: bool) !void {
-        if (try self.getFileMetadata(file_id)) |metadata| {
-            var updated = metadata;
-
-            // Only update if the chunk status actually changed
-            if (completed != (updated.chunk_status.get(chunk_index) orelse false)) {
-                try updated.chunk_status.put(chunk_index, completed);
-
-                // Recalculate completed chunks count
-                var completed_count: usize = 0;
-                var it = updated.chunk_status.iterator();
-                while (it.next()) |entry| {
-                    if (entry.value_ptr.*) {
-                        completed_count += 1;
-                    }
-                }
-
-                updated.completed_chunks = completed_count;
-
-                // Update overall status if all chunks are complete
-                if (completed_count == updated.total_chunks) {
-                    updated.upload_status = .completed;
-                }
-
-                try self.storeFileMetadata(updated);
-            }
-
-            updated.deinit();
-        }
-    }
-
-    pub fn isChunkComplete(self: *RedisJobQueue, file_id: []const u8, chunk_index: usize) !bool {
-        if (try self.getFileMetadata(file_id)) |metadata| {
-            defer metadata.deinit();
-            return metadata.chunk_status.get(chunk_index) orelse false;
-        }
-        return false;
-    }
-
-    pub fn getMissingChunks(self: *RedisJobQueue, file_id: []const u8) !?[]usize {
-        if (try self.getFileMetadata(file_id)) |metadata| {
-            defer metadata.deinit();
-
-            var missing_chunks = std.ArrayList(usize).init(self.allocator);
-
-            var i: usize = 0;
-            while (i < metadata.total_chunks) : (i += 1) {
-                if (!(metadata.chunk_status.get(i) orelse false)) {
-                    try missing_chunks.append(i);
-                }
-            }
-
-            return missing_chunks.toOwnedSlice();
-        }
-        return null;
-    }
-    pub fn getUploadProgress(self: *RedisJobQueue, file_id: []const u8) !?struct { completed: usize, total: usize } {
-        if (try self.getFileMetadata(file_id)) |metadata| {
-            return .{
-                .completed = metadata.completed_chunks,
-                .total = metadata.total_chunks,
-            };
-        }
-        return null;
-    }
     pub fn pushJob(self: *Self, job: *Job) !void {
         std.debug.print("Pushing new job: {s}\n", .{job.id});
 
