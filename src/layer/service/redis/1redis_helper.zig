@@ -66,14 +66,6 @@ pub const UploadSession = struct {
     }
 
     fn serialize(self: *const UploadSession) ![]const u8 {
-        // Create a temporary array for chunk status that's compatible with JSON
-        var chunk_status_array = try std.ArrayList(u8).initCapacity(self.allocator, self.total_chunks);
-        defer chunk_status_array.deinit();
-
-        for (self.chunk_status) |status| {
-            try chunk_status_array.append(if (status) 1 else 0);
-        }
-
         const json = try std.json.stringifyAlloc(self.allocator, .{
             .file_id = self.file_id,
             .file_name = self.file_name,
@@ -85,17 +77,13 @@ pub const UploadSession = struct {
             .status = @tagName(self.status),
             .created_at = self.created_at,
             .updated_at = self.updated_at,
-            .chunk_status = chunk_status_array.items,
+            .chunk_status = self.chunk_status,
         }, .{});
-
-        std.debug.print("Serialized JSON: {s}\n", .{json});
         return json;
     }
 
     fn deserialize(allocator: std.mem.Allocator, json: []const u8) !*UploadSession {
-        std.debug.print("Deserializing JSON: {s}\n", .{json});
-
-        const ParsedData = struct {
+        const parsed = try std.json.parseFromSlice(struct {
             file_id: []const u8,
             file_name: []const u8,
             total_size: usize,
@@ -106,16 +94,9 @@ pub const UploadSession = struct {
             status: []const u8,
             created_at: i64,
             updated_at: i64,
-            chunk_status: []u8,
-        };
-
-        const parsed = try std.json.parseFromSlice(ParsedData, allocator, json, .{});
+            chunk_status: []bool,
+        }, allocator, json, .{});
         defer parsed.deinit();
-
-        var chunk_status = try allocator.alloc(bool, parsed.value.total_chunks);
-        for (parsed.value.chunk_status, 0..) |status, i| {
-            chunk_status[i] = status != 0;
-        }
 
         const session = try allocator.create(UploadSession);
         session.* = .{
@@ -129,10 +110,9 @@ pub const UploadSession = struct {
             .status = std.meta.stringToEnum(SessionStatus, parsed.value.status) orelse .initializing,
             .created_at = parsed.value.created_at,
             .updated_at = parsed.value.updated_at,
-            .chunk_status = chunk_status,
+            .chunk_status = try allocator.dupe(bool, parsed.value.chunk_status),
             .allocator = allocator,
         };
-
         return session;
     }
 };
@@ -172,13 +152,27 @@ pub const RedisClient = struct {
             const json = try session.serialize();
             defer self.allocator.free(json);
 
-            var cmd_buf: [4096]u8 = undefined;
-            const cmd = try std.fmt.bufPrintZ(&cmd_buf, "SET upload:{s} {s}", .{
-                session.file_id,
-                json,
-            });
+            // Escape special characters in JSON
+            var escaped_buf = try self.allocator.alloc(u8, json.len * 2);
+            defer self.allocator.free(escaped_buf);
+            var escaped_len: usize = 0;
 
-            std.debug.print("Redis SET command: {s}\n", .{cmd});
+            for (json) |character| {
+                if (character == '"') {
+                    escaped_buf[escaped_len] = '\\';
+                    escaped_len += 1;
+                }
+                escaped_buf[escaped_len] = character;
+                escaped_len += 1;
+            }
+
+            const escaped_json = escaped_buf[0..escaped_len];
+
+            var cmd_buf: [4096]u8 = undefined;
+            const cmd = try std.fmt.bufPrintZ(&cmd_buf, "SET upload:{s} \"{s}\"", .{
+                session.file_id,
+                escaped_json,
+            });
 
             const reply = @as(?*c.redisReply, @ptrCast(@alignCast(c.redisCommand(ctx, cmd.ptr))));
             if (reply) |r| {
@@ -188,6 +182,7 @@ pub const RedisClient = struct {
                     return RedisError.CommandFailed;
                 }
             } else {
+                std.debug.print("command failed", .{});
                 return RedisError.CommandFailed;
             }
         } else {
@@ -200,21 +195,16 @@ pub const RedisClient = struct {
             var cmd_buf: [256]u8 = undefined;
             const cmd = try std.fmt.bufPrintZ(&cmd_buf, "GET upload:{s}", .{file_id});
 
-            std.debug.print("Redis GET command: {s}\n", .{cmd});
-
             const reply = @as(?*c.redisReply, @ptrCast(@alignCast(c.redisCommand(ctx, cmd.ptr))));
             if (reply) |r| {
                 defer c.freeReplyObject(r);
                 if (r.type == c.REDIS_REPLY_STRING) {
                     const json = r.str[0..@intCast(r.len)];
-                    std.debug.print("Retrieved JSON from Redis: {s}\n", .{json});
                     return UploadSession.deserialize(self.allocator, json);
                 } else {
-                    std.debug.print("Redis GET returned non-string response type: {d}\n", .{r.type});
                     return RedisError.SessionNotFound;
                 }
             } else {
-                std.debug.print("Redis GET command failed\n", .{});
                 return RedisError.CommandFailed;
             }
         } else {
