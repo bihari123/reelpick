@@ -124,8 +124,7 @@ pub const ConnectionPool = struct {
         _ = c.sqlite3_shutdown();
     }
 
-    // Rest of the code remains the same...
-    // [Previous implementation of acquire, release, removeIdleConnections, and PooledStatement]
+  
     pub fn acquire(self: *Self) SqliteError!*Connection {
         self.mutex.lock();
         defer self.mutex.unlock();
