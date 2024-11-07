@@ -1,0 +1,32 @@
+version: "3.8"
+services:
+  envoy:
+    image: envoyproxy/envoy:v1.28-latest
+    ports:
+      - "8080:8080" # Main proxy port
+      - "9901:9901" # Admin interface
+    volumes:
+      - ./envoy.yaml:/etc/envoy/envoy.yaml:ro
+    command: ["envoy", "-c", "/etc/envoy/envoy.yaml"]
+    networks:
+      - envoy_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9901/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+  # Example backend service
+  backend:
+    image: nginx:alpine
+    networks:
+      - envoy_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+networks:
+  envoy_network:
+    driver: bridge
+volumes:
+  envoy_config:
