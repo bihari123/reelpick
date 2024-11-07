@@ -1,2 +1,9 @@
 .zig-cache/
+
+sample/
+
+zig-cache/
 zig-out/
+build/
+build-*/
+docgen_tmp/
