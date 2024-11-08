@@ -25,6 +25,8 @@ pub const UploadError = error{
     InvalidSession,
     Unauthorized,
     RedisError,
+    TrimError,
+    JoinError,
 };
 
 // API token validation
@@ -81,15 +83,15 @@ pub fn finalizeUpload(self: *server.FileServer, session: *redis.UploadSession) !
         try std.fs.cwd().deleteFile(chunk_path);
     }
 
-    {
-        const file_size = std.math.cast(i64, final_file.getEndPos() catch 0) orelse 0;
-        repo.update_final_table(session.file_id, file_size, final_path);
-    }
     ////
 
     // Delete chunk directory and cleanup Redis
     try std.fs.cwd().deleteTree(chunk_dir);
     try self.redis_client.deleteSession(session.file_id);
+    {
+        const file_size = std.math.cast(i64, final_file.getEndPos() catch 0) orelse 0;
+        repo.update_final_table(session.file_id, file_size, final_path);
+    }
 }
 
 pub fn validateAuth(r: zap.Request) !void {

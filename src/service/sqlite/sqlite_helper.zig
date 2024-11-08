@@ -124,7 +124,6 @@ pub const ConnectionPool = struct {
         _ = c.sqlite3_shutdown();
     }
 
-  
     pub fn acquire(self: *Self) SqliteError!*Connection {
         self.mutex.lock();
         defer self.mutex.unlock();
@@ -255,7 +254,7 @@ pub const ConnectionPool = struct {
             const result = c.sqlite3_bind_text(
                 self.stmt.?,
                 @intCast(index),
-                value.ptr,
+                @ptrCast(value.ptr),
                 @intCast(value.len),
                 c.SQLITE_TRANSIENT,
             );

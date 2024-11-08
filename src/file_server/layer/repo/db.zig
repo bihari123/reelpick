@@ -53,7 +53,7 @@ pub fn update_chunk_table(file_id: []const u8, total_chunks: i64, uploaded_chunk
     defer stmt.deinit();
 
     stmt.bindText(1, file_id) catch {
-        std.log.err("Failed to bind text", .{});
+        std.log.err("Failed to bind text file_id in chunk table", .{});
         return;
     };
 
@@ -67,7 +67,7 @@ pub fn update_chunk_table(file_id: []const u8, total_chunks: i64, uploaded_chunk
         return;
     };
     stmt.bindText(4, chunk_path) catch {
-        std.log.err("Failed to bind text", .{});
+        std.log.err("Failed to bind text chunkpath in chunk table", .{});
         return;
     };
     stmt.bindInt(5, 1) catch {
@@ -75,7 +75,7 @@ pub fn update_chunk_table(file_id: []const u8, total_chunks: i64, uploaded_chunk
         return;
     };
     _ = stmt.step() catch {
-        std.log.err("Failed to execute statement", .{});
+        std.log.err("Failed to execute statement in chunk table", .{});
         return;
     };
 }
@@ -101,7 +101,7 @@ pub fn update_final_table(file_id: []const u8, file_size: i64, file_path: []u8) 
     defer stmt.deinit();
 
     stmt.bindText(1, file_id) catch {
-        std.log.err("Failed to bind text", .{});
+        std.log.err("Failed to bind text file_id in final table", .{});
         return;
     };
 
@@ -111,12 +111,12 @@ pub fn update_final_table(file_id: []const u8, file_size: i64, file_path: []u8) 
     };
 
     stmt.bindText(4, file_path) catch {
-        std.log.err("Failed to bind text", .{});
+        std.log.err("Failed to bind text file path in final table", .{});
         return;
     };
 
     _ = stmt.step() catch {
-        std.log.err("Failed to execute statement", .{});
+        std.log.err("Failed to execute statement in final table", .{});
         return;
     };
 }

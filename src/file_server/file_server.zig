@@ -8,13 +8,16 @@ const repo = @import("./layer/repo/db.zig");
 const initialize = @import("./layer/controller/initialize.zig");
 const upload = @import("./layer/controller/upload.zig");
 const status = @import("./layer/controller/status.zig");
-
+const trim = @import("./layer/controller/trim.zig");
+const join = @import("./layer/controller/join.zig");
 pub const FileServer = struct {
     allocator: std.mem.Allocator,
     redis_client: redis.RedisClient,
     ep_initialize: zap.Endpoint,
     ep_chunk: zap.Endpoint,
     ep_status: zap.Endpoint,
+    ep_trim: zap.Endpoint,
+    ep_join: zap.Endpoint,
 
     pub fn init(allocator: std.mem.Allocator) !*FileServer {
         // Create uploads directory
@@ -45,6 +48,16 @@ pub const FileServer = struct {
                 .get = status.handleStatus,
                 .options = status.handleOptions,
             }),
+            .ep_trim = zap.Endpoint.init(.{
+                .path = "/api/video/trim",
+                .post = trim.handleTrim,
+                .options = status.handleOptions,
+            }),
+            .ep_join = zap.Endpoint.init(.{
+                .path = "/api/video/join",
+                .post = join.handleJoin,
+                .options = status.handleOptions,
+            }),
         };
 
         return server;
@@ -68,6 +81,8 @@ pub const FileServer = struct {
         try listener.register(&self.ep_initialize);
         try listener.register(&self.ep_chunk);
         try listener.register(&self.ep_status);
+        try listener.register(&self.ep_trim);
+        try listener.register(&self.ep_join);
 
         try listener.listen();
 
