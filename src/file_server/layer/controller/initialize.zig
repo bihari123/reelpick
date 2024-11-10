@@ -3,6 +3,7 @@ const zap = @import("zap");
 const redis = @import("../../../service/redis/redis_helper.zig");
 const sqlite = @import("../../../service/sqlite/sqlite_helper.zig");
 const Thread = std.Thread;
+const opensearch = @import("../../../service/opensearch/opensearch_helper.zig");
 const val = @import("./utils.zig");
 const repo = @import("../repo/db.zig");
 const server = @import("../../file_server.zig");
@@ -82,6 +83,38 @@ pub fn handleInitialize(ep: *zap.Endpoint, r: zap.Request) void {
             return;
         };
 
+        {
+            var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+            defer _ = gpa.deinit();
+            const allocator = gpa.allocator();
+
+            if (std.fmt.allocPrint(allocator, "{{\"directory\": \"{}\", \"file_name\": \"{s}\", \"file_size\": {any} }}", .{ std.zig.fmtEscapes(chunk_dir), init_data.fileName, init_data.fileSize })) |doc| {
+                defer allocator.free(doc);
+                // Get singleton instance
+                if (opensearch.OpenSearchClient.getInstance(allocator, "http://localhost:9200")) |client| {
+                    defer client.deinit();
+
+                    // Index a document
+                    client.index("initialize_upload", file_id, doc) catch {
+                        std.debug.print("can't index opensearch ", .{});
+                    };
+                } else |err| {
+                    switch (err) {
+                        opensearch.OpenSearchError.RequestError => {
+                            std.debug.print("Failed to connect to OpenSearch: {!}\n", .{err});
+                        },
+                        opensearch.OpenSearchError.URLError => {
+                            std.debug.print("Invalid URL provided: {!}\n", .{err});
+                        },
+                        else => {
+                            std.debug.print("Unexpected error: {!}\n", .{err});
+                        },
+                    }
+                }
+            } else |err| {
+                std.debug.print("error in preparing opensearch statement {!}", .{err});
+            }
+        }
         // Send response
         const response = .{
             .fileId = file_id,

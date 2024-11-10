@@ -88,12 +88,12 @@ pub const UploadSession = struct {
             .chunk_status = chunk_status_array.items,
         }, .{});
 
-       // std.debug.print("Serialized JSON: {s}\n", .{json});
+        // std.debug.print("Serialized JSON: {s}\n", .{json});
         return json;
     }
 
     fn deserialize(allocator: std.mem.Allocator, json: []const u8) !*UploadSession {
-       // std.debug.print("Deserializing JSON: {s}\n", .{json});
+        // std.debug.print("Deserializing JSON: {s}\n", .{json});
 
         const ParsedData = struct {
             file_id: []const u8,
@@ -178,7 +178,7 @@ pub const RedisClient = struct {
                 json,
             });
 
-           // std.debug.print("Redis SET command: {s}\n", .{cmd});
+            // std.debug.print("Redis SET command: {s}\n", .{cmd});
 
             const reply = @as(?*c.redisReply, @ptrCast(@alignCast(c.redisCommand(ctx, cmd.ptr))));
             if (reply) |r| {
@@ -200,14 +200,14 @@ pub const RedisClient = struct {
             var cmd_buf: [256]u8 = undefined;
             const cmd = try std.fmt.bufPrintZ(&cmd_buf, "GET upload:{s}", .{file_id});
 
-        //    std.debug.print("Redis GET command: {s}\n", .{cmd});
+            //    std.debug.print("Redis GET command: {s}\n", .{cmd});
 
             const reply = @as(?*c.redisReply, @ptrCast(@alignCast(c.redisCommand(ctx, cmd.ptr))));
             if (reply) |r| {
                 defer c.freeReplyObject(r);
                 if (r.type == c.REDIS_REPLY_STRING) {
                     const json = r.str[0..@intCast(r.len)];
-                   // std.debug.print("Retrieved JSON from Redis: {s}\n", .{json});
+                    // std.debug.print("Retrieved JSON from Redis: {s}\n", .{json});
                     return UploadSession.deserialize(self.allocator, json);
                 } else {
                     std.debug.print("Redis GET returned non-string response type: {d}\n", .{r.type});

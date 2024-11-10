@@ -45,10 +45,10 @@ pub fn db_init() !void {
 }
 pub fn update_chunk_table(file_id: []const u8, total_chunks: i64, uploaded_chunks: i64, chunk_path: []u8) void {
     var stmt = sqlite.ConnectionPool.PooledStatement.init(&pool,
-        \\INSERT INTO video_chunk_data (file_id, total_chunks, chunk_id, chunk_locations, is_complete) 
+        \\INSERT OR REPLACE INTO video_chunk_data (file_id, total_chunks, chunk_id, chunk_locations, is_complete) 
         \\VALUES (?1,?2,?3,?4,?5)
-    ) catch {
-        std.log.err("Failed to initialize statement", .{});
+    ) catch |err| {
+        std.log.err("Failed to initialize statement in chunk table: {!}", .{err});
         return; // Just return without the error
     };
     defer stmt.deinit();
@@ -83,9 +83,9 @@ pub fn update_chunk_table(file_id: []const u8, total_chunks: i64, uploaded_chunk
 
 pub fn update_final_table(file_id: []const u8, file_size: i64, file_path: []u8) void {
     var stmt = sqlite.ConnectionPool.PooledStatement.init(&pool,
-        \\INSERT INTO video_final_data (file_id, file_size, file_locations) VALUES (?1,?2,?3)
+        \\INSERT OR REPLACE INTO video_final_data (file_id, file_size, file_locations) VALUES (?1,?2,?3)
     ) catch {
-        std.log.err("Failed to initialize statement", .{});
+        std.log.err("Failed to initialize statement in final table", .{});
         return; // Just return without the error
     };
     defer stmt.deinit();

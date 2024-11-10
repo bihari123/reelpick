@@ -7,6 +7,8 @@ const val = @import("./utils.zig");
 const repo = @import("../repo/db.zig");
 const server = @import("../../file_server.zig");
 const utils = @import("./utils.zig");
+const opensearch = @import("../../../service/opensearch/opensearch_helper.zig");
+
 pub fn handleChunk(ep: *zap.Endpoint, r: zap.Request) void {
     const self: *server.FileServer = @fieldParentPtr("ep_chunk", ep);
     utils.addCorsHeaders(r) catch return;
@@ -131,4 +133,42 @@ pub fn handleChunk(ep: *zap.Endpoint, r: zap.Request) void {
         return;
     };
     r.sendBody(json) catch return;
+    {
+        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+        defer _ = gpa.deinit();
+        const allocator = gpa.allocator();
+
+        if (std.fmt.allocPrint(allocator, "{{\"chunk_path\": \"{}\", \"file_name\": \"{s}\", \"chunk_index\": {any} }}", .{ std.zig.fmtEscapes(chunk_path), session.file_name, chunk_index })) |doc| {
+            defer allocator.free(doc);
+            // Get singleton instance
+            if (opensearch.OpenSearchClient.getInstance(allocator, "http://localhost:9200")) |client| {
+                defer client.deinit();
+
+                if (std.fmt.allocPrint(allocator, "{s}_{d}", .{ file_id, chunk_index })) |doc_id| {
+                    defer allocator.free(doc_id);
+
+                    // Index a document
+                    client.index("chunk_upload", doc_id, doc) catch {
+                        std.debug.print("can't index opensearch ", .{});
+                    };
+                } else |err| {
+                    std.debug.print("error making doc id {!}\n", .{err});
+                }
+            } else |err| {
+                switch (err) {
+                    opensearch.OpenSearchError.RequestError => {
+                        std.debug.print("Failed to connect to OpenSearch: {!}\n", .{err});
+                    },
+                    opensearch.OpenSearchError.URLError => {
+                        std.debug.print("Invalid URL provided: {!}\n", .{err});
+                    },
+                    else => {
+                        std.debug.print("Unexpected error: {!}\n", .{err});
+                    },
+                }
+            }
+        } else |err| {
+            std.debug.print("error in preparing opensearch statement {!}\n", .{err});
+        }
+    }
 }

@@ -5,7 +5,7 @@ const Thread = std.Thread;
 const fileserver = @import("./file_server/file_server.zig");
 
 const repo = @import("./file_server/layer/repo/db.zig");
-
+const opensearch = @import("./service/opensearch/opensearch_helper.zig");
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{
         .thread_safe = true,
@@ -19,7 +19,6 @@ pub fn main() !void {
     defer repo.pool.deinit();
 
     try repo.db_init();
-    // Initialize general purpose allocator
 
     // Initialize server
     var server = try fileserver.FileServer.init(allocator);

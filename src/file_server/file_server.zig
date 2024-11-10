@@ -91,7 +91,7 @@ pub const FileServer = struct {
         // Start the event loop
         zap.start(.{
             .threads = 4,
-            .workers = 1,
+            .workers = 4,
         });
     }
 };

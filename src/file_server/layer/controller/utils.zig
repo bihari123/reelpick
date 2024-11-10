@@ -5,6 +5,7 @@ const sqlite = @import("../../../service/sqlite/sqlite_helper.zig");
 const Thread = std.Thread;
 const repo = @import("../repo/db.zig");
 const server = @import("../../file_server.zig");
+const opensearch = @import("../../../service/opensearch/opensearch_helper.zig");
 // File upload settings
 pub const UPLOAD_DIR = "uploads";
 pub const MAX_FILE_SIZE = 1000 * 1024 * 1024; // 1000MB
@@ -83,7 +84,38 @@ pub fn finalizeUpload(self: *server.FileServer, session: *redis.UploadSession) !
         try std.fs.cwd().deleteFile(chunk_path);
     }
 
-    ////
+    {
+        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+        defer _ = gpa.deinit();
+        const allocator = gpa.allocator();
+
+        if (std.fmt.allocPrint(allocator, "{{\"directory\": \"{}\", \"file_name\": \"{s}\", \"file_size\": {any},  \"total_chunks\": {any} }}", .{ std.zig.fmtEscapes(final_path), session.file_name, session.total_size, session.total_chunks })) |doc| {
+            defer allocator.free(doc);
+            // Get singleton instance
+            if (opensearch.OpenSearchClient.getInstance(allocator, "http://localhost:9200")) |client| {
+                defer client.deinit();
+
+                // Index a document
+                client.index("complete_upload", session.file_id, doc) catch {
+                    std.debug.print("can't index opensearch ", .{});
+                };
+            } else |err| {
+                switch (err) {
+                    opensearch.OpenSearchError.RequestError => {
+                        std.debug.print("Failed to connect to OpenSearch: {!}\n", .{err});
+                    },
+                    opensearch.OpenSearchError.URLError => {
+                        std.debug.print("Invalid URL provided: {!}\n", .{err});
+                    },
+                    else => {
+                        std.debug.print("Unexpected error: {!}\n", .{err});
+                    },
+                }
+            }
+        } else |err| {
+            std.debug.print("error in preparing opensearch statement {!}", .{err});
+        }
+    }
 
     // Delete chunk directory and cleanup Redis
     try std.fs.cwd().deleteTree(chunk_dir);
