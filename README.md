@@ -96,6 +96,13 @@ General Options:
 error: expected command argument
 ```
 
+## Install dependencies
+
+```
+sudo apt-get update && sudo apt-get install libhiredis-dev
+
+```
+
 ## Build
 
 First run the docker services. Go to each directory of the **/deployment** and run
