@@ -141,7 +141,7 @@ pub fn handleChunk(ep: *zap.Endpoint, r: zap.Request) void {
         if (std.fmt.allocPrint(allocator, "{{\"chunk_path\": \"{}\", \"file_name\": \"{s}\", \"chunk_index\": {any} }}", .{ std.zig.fmtEscapes(chunk_path), session.file_name, chunk_index })) |doc| {
             defer allocator.free(doc);
             // Get singleton instance
-            if (opensearch.OpenSearchClient.getInstance(allocator, "http://localhost:9200")) |client| {
+            if (opensearch.OpenSearchClient.getInstance(allocator, "0.0.0.0:9200")) |client| {
                 defer client.deinit();
 
                 if (std.fmt.allocPrint(allocator, "{s}_{d}", .{ file_id, chunk_index })) |doc_id| {

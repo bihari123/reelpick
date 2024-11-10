@@ -63,7 +63,8 @@ pub fn handleInitialize(ep: *zap.Endpoint, r: zap.Request) void {
         defer session.deinit();
 
         // Store session in Redis
-        self.redis_client.setSession(session) catch {
+        self.redis_client.setSession(session) catch |err| {
+            std.debug.print("error in storing session {!}", .{err});
             utils.sendErrorJson(r, val.UploadError.StoreSessionFailed, 500);
             return;
         };
@@ -91,7 +92,7 @@ pub fn handleInitialize(ep: *zap.Endpoint, r: zap.Request) void {
             if (std.fmt.allocPrint(allocator, "{{\"directory\": \"{}\", \"file_name\": \"{s}\", \"file_size\": {any} }}", .{ std.zig.fmtEscapes(chunk_dir), init_data.fileName, init_data.fileSize })) |doc| {
                 defer allocator.free(doc);
                 // Get singleton instance
-                if (opensearch.OpenSearchClient.getInstance(allocator, "http://localhost:9200")) |client| {
+                if (opensearch.OpenSearchClient.getInstance(allocator, "0.0.0.0:9200")) |client| {
                     defer client.deinit();
 
                     // Index a document

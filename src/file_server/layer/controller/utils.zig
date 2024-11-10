@@ -92,7 +92,7 @@ pub fn finalizeUpload(self: *server.FileServer, session: *redis.UploadSession) !
         if (std.fmt.allocPrint(allocator, "{{\"directory\": \"{}\", \"file_name\": \"{s}\", \"file_size\": {any},  \"total_chunks\": {any} }}", .{ std.zig.fmtEscapes(final_path), session.file_name, session.total_size, session.total_chunks })) |doc| {
             defer allocator.free(doc);
             // Get singleton instance
-            if (opensearch.OpenSearchClient.getInstance(allocator, "http://localhost:9200")) |client| {
+            if (opensearch.OpenSearchClient.getInstance(allocator, "0.0.0.0:9200")) |client| {
                 defer client.deinit();
 
                 // Index a document
@@ -142,7 +142,7 @@ pub fn validateAuth(r: zap.Request) !void {
 }
 
 pub fn addCorsHeaders(r: zap.Request) !void {
-    try r.setHeader("Access-Control-Allow-Origin", "*");
+    try r.setHeader("Access-Control-Allow-Origin", "0.0.0.0:3000");
     try r.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
     try r.setHeader("Access-Control-Allow-Headers", "Content-Type, X-File-Id, X-Chunk-Index, Accept, Authorization");
     try r.setHeader("Access-Control-Expose-Headers", "Authorization");
