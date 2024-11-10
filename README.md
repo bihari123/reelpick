@@ -120,6 +120,8 @@ go to the /frontend folder (front end only support file upload for now, for join
 $ npm  run start
 ```
 
+**Docker**: the backend is pushed on docker hub (docker pull bihari123/reelpick5050:latest)
+
 ## API for trimming and joining
 
 ```
