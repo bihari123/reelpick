@@ -1,0 +1,43 @@
+<svg width="104" height="106" viewBox="0 0 104 106" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="Component 1">
+<circle id="Ellipse 32" cx="3" cy="48" r="3" fill="#339F43"/>
+<circle id="Ellipse 33" cx="4" cy="40" r="3" fill="#339F43"/>
+<circle id="Ellipse 34" cx="7" cy="32" r="3" fill="#339F43"/>
+<circle id="Ellipse 35" cx="11" cy="25" r="3" fill="#339F43"/>
+<circle id="Ellipse 36" cx="17" cy="18" r="3" fill="#339F43"/>
+<circle id="Ellipse 37" cx="24" cy="12" r="3" fill="#339F43"/>
+<circle id="Ellipse 38" cx="31" cy="8" r="3" fill="#339F43"/>
+<circle id="Ellipse 39" cx="39" cy="4" r="3" fill="#339F43"/>
+<circle id="Ellipse 40" cx="47" cy="3" r="3" fill="#339F43"/>
+<circle id="Ellipse 32_2" cx="3" cy="3" r="3" transform="matrix(-1 0 0 1 104 45)" fill="#339F43"/>
+<circle id="Ellipse 33_2" cx="3" cy="3" r="3" transform="matrix(-1 0 0 1 103 37)" fill="#339F43"/>
+<circle id="Ellipse 34_2" cx="3" cy="3" r="3" transform="matrix(-1 0 0 1 100 29)" fill="#339F43"/>
+<circle id="Ellipse 35_2" cx="3" cy="3" r="3" transform="matrix(-1 0 0 1 96 22)" fill="#339F43"/>
+<circle id="Ellipse 36_2" cx="3" cy="3" r="3" transform="matrix(-1 0 0 1 90 15)" fill="#339F43"/>
+<circle id="Ellipse 37_2" cx="3" cy="3" r="3" transform="matrix(-1 0 0 1 83 9)" fill="#339F43"/>
+<circle id="Ellipse 38_2" cx="3" cy="3" r="3" transform="matrix(-1 0 0 1 76 5)" fill="#339F43"/>
+<circle id="Ellipse 39_2" cx="3" cy="3" r="3" transform="matrix(-1 0 0 1 68 1)" fill="#339F43"/>
+<circle id="Ellipse 40_2" cx="3" cy="3" r="3" transform="matrix(-1 0 0 1 60 0)" fill="#339F43"/>
+<circle id="Ellipse 32_3" cx="3" cy="3" r="3" transform="matrix(1 0 0 -1 0 61)" fill="#339F43"/>
+<circle id="Ellipse 33_3" cx="3" cy="3" r="3" transform="matrix(1 0 0 -1 1 69)" fill="#339F43"/>
+<circle id="Ellipse 34_3" cx="3" cy="3" r="3" transform="matrix(1 0 0 -1 4 77)" fill="#339F43"/>
+<circle id="Ellipse 35_3" cx="3" cy="3" r="3" transform="matrix(1 0 0 -1 8 84)" fill="#339F43"/>
+<circle id="Ellipse 36_3" cx="3" cy="3" r="3" transform="matrix(1 0 0 -1 14 91)" fill="#339F43"/>
+<circle id="Ellipse 37_3" cx="3" cy="3" r="3" transform="matrix(1 0 0 -1 21 97)" fill="#339F43"/>
+<circle id="Ellipse 38_3" cx="3" cy="3" r="3" transform="matrix(1 0 0 -1 28 101)" fill="#339F43"/>
+<circle id="Ellipse 39_3" cx="3" cy="3" r="3" transform="matrix(1 0 0 -1 36 105)" fill="#339F43"/>
+<circle id="Ellipse 40_3" cx="3" cy="3" r="3" transform="matrix(1 0 0 -1 44 106)" fill="#339F43"/>
+<circle id="Ellipse 32_4" cx="101" cy="58" r="3" transform="rotate(180 101 58)" fill="#339F43"/>
+<circle id="Ellipse 33_4" cx="100" cy="66" r="3" transform="rotate(180 100 66)" fill="#339F43"/>
+<circle id="Ellipse 34_4" cx="97" cy="74" r="3" transform="rotate(180 97 74)" fill="#339F43"/>
+<circle id="Ellipse 35_4" cx="93" cy="81" r="3" transform="rotate(180 93 81)" fill="#339F43"/>
+<circle id="Ellipse 36_4" cx="87" cy="88" r="3" transform="rotate(180 87 88)" fill="#339F43"/>
+<circle id="Ellipse 37_4" cx="80" cy="94" r="3" transform="rotate(180 80 94)" fill="#339F43"/>
+<circle id="Ellipse 38_4" cx="73" cy="98" r="3" transform="rotate(180 73 98)" fill="#339F43"/>
+<circle id="Ellipse 39_4" cx="65" cy="102" r="3" transform="rotate(180 65 102)" fill="#339F43"/>
+<circle id="Ellipse 40_4" cx="57" cy="103" r="3" transform="rotate(180 57 103)" fill="#339F43"/>
+<g id="Tick Circle">
+<path id="Vector" fill-rule="evenodd" clip-rule="evenodd" d="M52.3333 91.6667C73.5042 91.6667 90.6667 74.5042 90.6667 53.3333C90.6667 32.1624 73.5042 15 52.3333 15C31.1624 15 14 32.1624 14 53.3333C14 74.5042 31.1624 91.6667 52.3333 91.6667ZM73.642 43.751C74.7011 42.5681 74.6007 40.7505 73.4177 39.6914C72.2347 38.6322 70.4171 38.7327 69.358 39.9156L56.4429 54.3411C53.8259 57.2642 52.0635 59.2224 50.5567 60.4889C49.1213 61.6953 48.2782 61.9583 47.5417 61.9583C46.8052 61.9583 45.9621 61.6953 44.5267 60.4889C43.0199 59.2224 41.2575 57.2642 38.6405 54.3411L35.3086 50.6197C34.2495 49.4367 32.4319 49.3363 31.249 50.3954C30.066 51.4545 29.9656 53.2721 31.0247 54.4551L34.4989 58.3355C36.9363 61.0582 38.9693 63.3292 40.827 64.8906C42.7921 66.5423 44.9117 67.7083 47.5417 67.7083C50.1716 67.7083 52.2912 66.5423 54.2563 64.8906C56.114 63.3292 58.147 61.0582 60.5844 58.3356L73.642 43.751Z" fill="#339F43"/>
+</g>
+</g>
+</svg>

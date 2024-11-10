@@ -1,0 +1,56 @@
+# Stage 1: Development
+FROM node:18-alpine AS development
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies
+RUN npm install
+
+# Copy project files
+COPY . .
+
+# Expose development port
+EXPOSE 3000
+
+# Start development server using the standard CRA start script
+CMD ["npm", "start"]
+
+# Stage 2: Build
+FROM node:18-alpine AS builder
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm install
+
+COPY . .
+
+# Build the application
+RUN npm run build
+
+# Stage 3: Production
+FROM nginx:alpine AS production
+
+# Copy built assets from builder
+COPY --from=builder /app/build /usr/share/nginx/html
+
+# Add nginx configuration to handle React Router
+RUN echo $'\
+  server {\n\
+  listen 80;\n\
+  location / {\n\
+  root /usr/share/nginx/html;\n\
+  index index.html;\n\
+  try_files $uri $uri/ /index.html;\n\
+  }\n\
+  }' > /etc/nginx/conf.d/default.conf
+
+# Expose port 80
+EXPOSE 80
+
+# Start nginx
+CMD ["nginx", "-g", "daemon off;"]
