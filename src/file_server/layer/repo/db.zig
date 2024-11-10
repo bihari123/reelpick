@@ -17,13 +17,14 @@ pub fn db_init() !void {
     {
         var stmt = try sqlite.ConnectionPool.PooledStatement.init(&pool,
             \\       CREATE TABLE IF NOT EXISTS video_chunk_data (
-            \\  file_id TEXT PRIMARY KEY,
+            \\  file_id TEXT ,
             \\  total_chunks INTEGER NOT NULL,
-            \\    chunks_received INTEGER DEFAULT 0,
+            \\    chunk_id INTEGER DEFAULT 0,
             \\  chunk_locations TEXT,  
             \\ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             \\ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            \\  is_complete BOOLEAN DEFAULT FALSE
+            \\  is_complete BOOLEAN DEFAULT FALSE,
+            \\ PRIMARY KEY (file_id, chunk_id)
             \\);       
         );
         defer stmt.deinit();
@@ -44,7 +45,7 @@ pub fn db_init() !void {
 }
 pub fn update_chunk_table(file_id: []const u8, total_chunks: i64, uploaded_chunks: i64, chunk_path: []u8) void {
     var stmt = sqlite.ConnectionPool.PooledStatement.init(&pool,
-        \\INSERT INTO video_chunk_data (file_id, total_chunks, chunks_received, chunk_locations, is_complete) 
+        \\INSERT INTO video_chunk_data (file_id, total_chunks, chunk_id, chunk_locations, is_complete) 
         \\VALUES (?1,?2,?3,?4,?5)
     ) catch {
         std.log.err("Failed to initialize statement", .{});
@@ -81,17 +82,6 @@ pub fn update_chunk_table(file_id: []const u8, total_chunks: i64, uploaded_chunk
 }
 
 pub fn update_final_table(file_id: []const u8, file_size: i64, file_path: []u8) void {
-
-    // var stmt = try sqlite.ConnectionPool.PooledStatement.init(&pool,
-    //     \\INSERT INTO video_final_data (file_id, file_size, file_locations) VALUES (?1,?2,?3)
-    // );
-    // defer stmt.deinit();
-
-    // try stmt.bindText(1, file_id);
-    // try stmt.bindInt(2, file_size);
-    // try stmt.bindText(3, file_path);
-    // _ = try stmt.step();
-
     var stmt = sqlite.ConnectionPool.PooledStatement.init(&pool,
         \\INSERT INTO video_final_data (file_id, file_size, file_locations) VALUES (?1,?2,?3)
     ) catch {
@@ -110,7 +100,7 @@ pub fn update_final_table(file_id: []const u8, file_size: i64, file_path: []u8) 
         return;
     };
 
-    stmt.bindText(4, file_path) catch {
+    stmt.bindText(3, file_path) catch {
         std.log.err("Failed to bind text file path in final table", .{});
         return;
     };
