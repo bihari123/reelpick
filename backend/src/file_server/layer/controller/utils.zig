@@ -142,7 +142,7 @@ pub fn validateAuth(r: zap.Request) !void {
 }
 
 pub fn addCorsHeaders(r: zap.Request) !void {
-    try r.setHeader("Access-Control-Allow-Origin", "0.0.0.0:3000");
+    try r.setHeader("Access-Control-Allow-Origin", "*");
     try r.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
     try r.setHeader("Access-Control-Allow-Headers", "Content-Type, X-File-Id, X-Chunk-Index, Accept, Authorization");
     try r.setHeader("Access-Control-Expose-Headers", "Authorization");
