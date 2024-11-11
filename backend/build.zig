@@ -133,9 +133,6 @@ pub fn build(b: *std.Build) void {
     // Similar to creating the run step earlier, this exposes a `test` step to
     // the `zig build --help` menu, providing a way for the user to request
     // running the unit tests.
-    const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&run_lib_unit_tests.step);
-    test_step.dependOn(&run_exe_unit_tests.step);
 
     // Create test step
     const opensearch_tests = b.addTest(.{
@@ -148,9 +145,33 @@ pub fn build(b: *std.Build) void {
     opensearch_tests.linkSystemLibrary("curl");
     opensearch_tests.linkLibC();
 
-    const run_main_tests = b.addRunArtifact(opensearch_tests);
+    const run_opensearch_tests = b.addRunArtifact(opensearch_tests);
 
     // Create a test step that developers can invoke
-    const opensearch_test_step = b.step("opensearch_test", "Run library tests");
-    opensearch_test_step.dependOn(&run_main_tests.step);
+    //const opensearch_test_step = b.step("opensearch_test", "Run library tests");
+    //opensearch_test_step.dependOn(&run_main_tests.step);
+
+    //Create the test executable
+    const tests = b.addTest(.{
+        .root_source_file = .{ .cwd_relative =  "src/service/sqlite/sqlite_helper.zig"},
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // Add SQLite C source
+    tests.addCSourceFile(.{
+        .file = .{ .cwd_relative  = "third_party/sqlite/sqlite3.c" },
+        .flags = &sqlite_options,
+    });
+    tests.addIncludePath(.{ .cwd_relative  = "third_party/sqlite" });
+    tests.linkLibC();
+
+    // Create test step
+    const run_tests = b.addRunArtifact(tests);
+    const test_step = b.step("test", "Run the tests");
+    test_step.dependOn(&run_tests.step);
+    test_step.dependOn(&run_lib_unit_tests.step);
+    test_step.dependOn(&run_exe_unit_tests.step);
+
+    test_step.dependOn(&run_opensearch_tests.step);
 }

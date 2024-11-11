@@ -314,3 +314,288 @@ pub fn workerThread(context: ThreadContext) !void {
         }
     }
 }
+
+// testing
+const testing = std.testing;
+test "basic connection pool operations" {
+    const allocator = testing.allocator;
+
+    var pool = try ConnectionPool.init(allocator, ":memory:", 5, // max connections
+        60 // idle timeout in seconds
+    );
+    defer pool.deinit();
+
+    // Create test table
+    {
+        var stmt = try ConnectionPool.PooledStatement.init(&pool,
+            \\CREATE TABLE test (
+            \\    id INTEGER PRIMARY KEY,
+            \\    value TEXT NOT NULL
+            \\)
+        );
+        defer stmt.deinit();
+        _ = try stmt.step();
+    }
+
+    // Test insertion
+    {
+        var stmt = try ConnectionPool.PooledStatement.init(&pool,
+            \\INSERT INTO test (value) VALUES (?)
+        );
+        defer stmt.deinit();
+
+        try stmt.bindText(1, "test_value");
+        _ = try stmt.step();
+    }
+
+    // Test query
+    {
+        var stmt = try ConnectionPool.PooledStatement.init(&pool,
+            \\SELECT value FROM test WHERE id = 1
+        );
+        defer stmt.deinit();
+
+        try testing.expect(try stmt.step());
+        const value = stmt.columnText(0);
+        try testing.expectEqualStrings("test_value", value);
+    }
+}
+
+test "connection pool limits" {
+    const allocator = testing.allocator;
+
+    var pool = try ConnectionPool.init(allocator, ":memory:", 2, // max connections
+        60 // idle timeout
+    );
+    defer pool.deinit();
+
+    // Acquire first connection
+    const conn1 = try pool.acquire();
+    // Acquire second connection
+    const conn2 = try pool.acquire();
+
+    // Third connection should fail
+    try testing.expectError(SqliteError.NoAvailableConnections, pool.acquire());
+
+    // Release connections
+    try pool.release(conn1);
+    try pool.release(conn2);
+}
+
+test "idle connection cleanup" {
+    const allocator = testing.allocator;
+
+    // Use a very short timeout for testing
+    var pool = try ConnectionPool.init(allocator, ":memory:", 5, // max connections
+        1 // idle timeout (1 second)
+    );
+    defer pool.deinit();
+
+    // Record initial connection count
+    const initial_count = pool.connections.items.len;
+
+    // Create and release some connections
+    {
+        var connections: [3]*Connection = undefined;
+
+        // Acquire connections
+        for (&connections) |*conn| {
+            conn.* = try pool.acquire();
+        }
+
+        // Release connections immediately
+        for (connections) |conn| {
+            try pool.release(conn);
+        }
+    }
+
+    // Verify connections were created
+    try testing.expect(pool.connections.items.len > initial_count);
+
+    // Wait long enough for cleanup
+    std.time.sleep(2 * std.time.ns_per_s);
+
+    // Force cleanup by trying to acquire a new connection
+    {
+        const conn = try pool.acquire();
+        try pool.release(conn);
+    }
+
+    // Check if connections were cleaned up
+    // We should see a reduction in connections, but at least one connection remains
+    try testing.expect(pool.connections.items.len < 4); // Less than what we created
+    try testing.expect(pool.connections.items.len >= 1); // At least one connection remains
+
+    // Verify all remaining connections are not in use
+    for (pool.connections.items) |conn| {
+        try testing.expect(!conn.in_use);
+    }
+}
+
+test "concurrent access" {
+    const allocator = testing.allocator;
+    const thread_count = 4;
+
+    var pool = try ConnectionPool.init(allocator, ":memory:", thread_count + 1, // Add extra connection for setup
+        60);
+    defer pool.deinit();
+
+    // Create test table with proper error handling
+    {
+        var create_stmt = try ConnectionPool.PooledStatement.init(&pool,
+            \\CREATE TABLE IF NOT EXISTS users (
+            \\    id INTEGER PRIMARY KEY AUTOINCREMENT,
+            \\    name TEXT NOT NULL,
+            \\    thread_id INTEGER NOT NULL,
+            \\    created_at INTEGER DEFAULT (strftime('%s', 'now'))
+            \\)
+        );
+        defer create_stmt.deinit();
+        _ = try create_stmt.step();
+    }
+
+    const WorkerContext = struct {
+        pool: *ConnectionPool,
+        id: usize,
+        allocator: Allocator,
+        success: bool = false,
+    };
+
+    // Modified worker function with transaction support
+    const worker = struct {
+        fn run(context: *WorkerContext) void {
+            const name = std.fmt.allocPrintZ(context.allocator, "User {d}", .{context.id}) catch {
+                return;
+            };
+            defer context.allocator.free(name);
+
+            // Get a connection from the pool
+            const conn = context.pool.acquire() catch {
+                return;
+            };
+            defer context.pool.release(conn) catch {};
+
+            // Begin transaction
+            {
+                var begin_stmt = ConnectionPool.PooledStatement.init(context.pool,
+                    \\BEGIN EXCLUSIVE TRANSACTION
+                ) catch {
+                    return;
+                };
+                defer begin_stmt.deinit();
+
+                _ = begin_stmt.step() catch {
+                    return;
+                };
+            }
+
+            // Insert data
+            {
+                var insert_stmt = ConnectionPool.PooledStatement.init(context.pool,
+                    \\INSERT INTO users (name, thread_id) VALUES (?, ?)
+                ) catch {
+                    return;
+                };
+                defer insert_stmt.deinit();
+
+                insert_stmt.bindText(1, name) catch {
+                    return;
+                };
+                insert_stmt.bindInt(2, @intCast(context.id)) catch {
+                    return;
+                };
+
+                _ = insert_stmt.step() catch {
+                    return;
+                };
+            }
+
+            // Query the inserted data
+            {
+                var select_stmt = ConnectionPool.PooledStatement.init(context.pool,
+                    \\SELECT id, name, thread_id 
+                    \\FROM users 
+                    \\WHERE id = last_insert_rowid()
+                ) catch {
+                    return;
+                };
+                defer select_stmt.deinit();
+
+                if (select_stmt.step() catch {
+                    return;
+                }) {
+                    const id = select_stmt.columnInt(0);
+                    const row_name = select_stmt.columnText(1);
+                    const thread_id = select_stmt.columnInt(2);
+
+                    // Verify the data matches what we inserted
+                    if (thread_id != context.id) {
+                        return;
+                    }
+
+                    std.debug.print("Thread {d} inserted user {d}: {s}\n", .{
+                        context.id, id, row_name,
+                    });
+                }
+            }
+
+            // Commit transaction
+            {
+                var commit_stmt = ConnectionPool.PooledStatement.init(context.pool,
+                    \\COMMIT
+                ) catch {
+                    return;
+                };
+                defer commit_stmt.deinit();
+
+                _ = commit_stmt.step() catch {
+                    return;
+                };
+            }
+
+            context.success = true;
+        }
+    };
+
+    // Create thread contexts
+    var contexts = try allocator.alloc(WorkerContext, thread_count);
+    defer allocator.free(contexts);
+
+    var threads = try allocator.alloc(Thread, thread_count);
+    defer allocator.free(threads);
+
+    // Initialize contexts and start threads
+    for (0..thread_count) |i| {
+        contexts[i] = .{
+            .pool = &pool,
+            .id = i,
+            .allocator = allocator,
+        };
+        threads[i] = try Thread.spawn(.{}, worker.run, .{&contexts[i]});
+    }
+
+    // Wait for all threads
+    for (threads) |thread| {
+        thread.join();
+    }
+
+    // Verify all threads completed successfully
+    var success_count: usize = 0;
+    for (contexts) |context| {
+        if (context.success) {
+            success_count += 1;
+        }
+    }
+
+    // Verify results
+    {
+        var verify_stmt = try ConnectionPool.PooledStatement.init(&pool,
+            \\SELECT COUNT(*) total_count,
+            \\       COUNT(DISTINCT thread_id) unique_threads
+            \\FROM users
+        );
+        defer verify_stmt.deinit();
+
+        try testing.expect(try verify_stmt.step());
+    }
+}

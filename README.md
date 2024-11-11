@@ -107,8 +107,14 @@ sudo apt-get update && sudo apt-get install libhiredis-dev
 go to the /backend dir and run the following commands
 ```
 $ zig test src/service/opensearch/opensearch_helper.zig -lc -lcurl
+
 $ zig test src/service/ffmpeg/ffmpeg_helper.zig 
+
 $ zig test src/service/redis/redis_helper.zig -I/usr/include -L/usr/lib -lhiredis
+
+$ zig test src/service/sqlite/sqlite_helper.zig -I./third_party/sqlite -lc third_party/sqlite/sqlite3.c -DSQLITE_THREADSAFE=1 -DSQLITE_ENABLE_JSON1 -DSQLITE_ENABLE_RTREE -DSQLITE_ENABLE_FTS5 -DSQLITE_ENABLE_COLUMN_METADATA -DSQLITE_ENABLE_UNLOCK_NOTIFY -DSQLITE_ENABLE_DBSTAT_VTAB -DSQLITE_SECURE_DELETE
+
+
 ```
 
 ## Build
