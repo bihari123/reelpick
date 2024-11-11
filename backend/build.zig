@@ -152,26 +152,32 @@ pub fn build(b: *std.Build) void {
     //opensearch_test_step.dependOn(&run_main_tests.step);
 
     //Create the test executable
-    const tests = b.addTest(.{
-        .root_source_file = .{ .cwd_relative =  "src/service/sqlite/sqlite_helper.zig"},
+    const sqlite_test = b.addTest(.{
+        .root_source_file = .{ .cwd_relative = "src/service/sqlite/sqlite_helper.zig" },
         .target = target,
         .optimize = optimize,
     });
 
     // Add SQLite C source
-    tests.addCSourceFile(.{
-        .file = .{ .cwd_relative  = "third_party/sqlite/sqlite3.c" },
+    sqlite_test.addCSourceFile(.{
+        .file = .{ .cwd_relative = "third_party/sqlite/sqlite3.c" },
         .flags = &sqlite_options,
     });
-    tests.addIncludePath(.{ .cwd_relative  = "third_party/sqlite" });
-    tests.linkLibC();
+    sqlite_test.addIncludePath(.{ .cwd_relative = "third_party/sqlite" });
+    sqlite_test.linkLibC();
 
+  
     // Create test step
-    const run_tests = b.addRunArtifact(tests);
+    const run_sqlite_tests = b.addRunArtifact(sqlite_test);
+   
+   
+
+
     const test_step = b.step("test", "Run the tests");
-    test_step.dependOn(&run_tests.step);
+    test_step.dependOn(&run_sqlite_tests.step);
     test_step.dependOn(&run_lib_unit_tests.step);
     test_step.dependOn(&run_exe_unit_tests.step);
 
     test_step.dependOn(&run_opensearch_tests.step);
+   // test_step.dependOn(&run_initialize_tests.step);
 }

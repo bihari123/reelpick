@@ -133,3 +133,194 @@ pub fn handleInitialize(ep: *zap.Endpoint, r: zap.Request) void {
         r.sendBody(json) catch return;
     }
 }
+
+// Test
+
+const testing = std.testing;
+
+// Mock FileServer for testing
+const MockFileServer = struct {
+    allocator: std.mem.Allocator,
+    redis_client: *redis.RedisClient,
+    ep_initialize: zap.Endpoint,
+
+    pub fn init(allocator: std.mem.Allocator) !*MockFileServer {
+        var self = try allocator.create(MockFileServer);
+        self.allocator = allocator;
+        self.redis_client = try redis.RedisClient.init(allocator, "localhost:6379");
+        self.ep_initialize = zap.Endpoint.init(.{});
+        return self;
+    }
+
+    pub fn deinit(self: *MockFileServer) void {
+        self.redis_client.deinit();
+        self.allocator.destroy(self);
+    }
+};
+
+// Mock Request for testing
+fn createMockRequest(allocator: std.mem.Allocator, body: ?[]const u8) !zap.Request {
+    return zap.Request{
+        .allocator = allocator,
+        .headers = std.StringHashMap([]const u8).init(allocator),
+        .body = body,
+        .response_sent = false,
+    };
+}
+
+test "handleInitialize - valid request" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    // Create mock server
+    var test_server = try MockFileServer.init(allocator);
+    defer test_server.deinit();
+
+    // Create valid request body
+    const request_body =
+        \\{
+        \\    "fileName": "test.txt",
+        \\    "fileSize": 1000,
+        \\    "totalChunks": 2
+        \\}
+    ;
+
+    var request = try createMockRequest(allocator, request_body);
+    defer request.deinit();
+
+    // Add auth header
+    try request.headers.put("Authorization", "Bearer valid-token");
+
+    // Call the function
+    handleInitialize(&test_server.ep_initialize, request);
+
+    // Verify response was sent
+    try testing.expect(request.response_sent);
+
+    // Parse response and verify fields
+    const response = try std.json.parseFromSlice(struct {
+        fileId: []const u8,
+        fileName: []const u8,
+        fileSize: usize,
+        totalChunks: usize,
+        chunkSize: usize,
+    }, allocator, request.sent_body.?, .{});
+    defer response.deinit();
+
+    try testing.expectEqualStrings("test.txt", response.value.fileName);
+    try testing.expectEqual(@as(usize, 1000), response.value.fileSize);
+    try testing.expect(response.value.fileId.len > 0);
+}
+
+test "handleInitialize - file too large" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var test_server = try MockFileServer.init(allocator);
+    defer test_server.deinit();
+
+    // Create request with file size larger than MAX_FILE_SIZE
+    const request_body =
+        \\{
+        \\    "fileName": "large.txt",
+        \\    "fileSize": 999999999999,
+        \\    "totalChunks": 2
+        \\}
+    ;
+
+    var request = try createMockRequest(allocator, request_body);
+    defer request.deinit();
+    try request.headers.put("Authorization", "Bearer valid-token");
+
+    handleInitialize(&test_server.ep_initialize, request);
+
+    try testing.expect(request.response_sent);
+    try testing.expectEqual(@as(u16, 400), request.status_code);
+}
+
+test "handleInitialize - invalid auth" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var test_server = try MockFileServer.init(allocator);
+    defer test_server.deinit();
+
+    const request_body =
+        \\{
+        \\    "fileName": "test.txt",
+        \\    "fileSize": 1000,
+        \\    "totalChunks": 2
+        \\}
+    ;
+
+    var request = try createMockRequest(allocator, request_body);
+    defer request.deinit();
+    // Don't add auth header
+ handleInitialize(&test_server.ep_initialize, request);
+
+    try testing.expect(request.response_sent);
+    try testing.expectEqual(@as(u16, 401), request.status_code);
+}
+
+test "handleInitialize - invalid request body" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var test_server = try MockFileServer.init(allocator);
+    defer test_server.deinit();
+
+    const request_body = "invalid json";
+
+    var request = try createMockRequest(allocator, request_body);
+    defer request.deinit();
+    try request.headers.put("Authorization", "Bearer valid-token");
+
+   handleInitialize(&test_server.ep_initialize, request);
+
+    try testing.expect(request.response_sent);
+    try testing.expectEqual(@as(u16, 400), request.status_code);
+}
+
+test "handleInitialize - redis session creation" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var test_server = try MockFileServer.init(allocator);
+    defer test_server.deinit();
+
+    const request_body =
+        \\{
+        \\    "fileName": "test.txt",
+        \\    "fileSize": 1000,
+        \\    "totalChunks": 2
+        \\}
+    ;
+
+    var request = try createMockRequest(allocator, request_body);
+    defer request.deinit();
+    try request.headers.put("Authorization", "Bearer valid-token");
+
+    handleInitialize(&test_server.ep_initialize, request);
+
+    // Parse response to get fileId
+    const response = try std.json.parseFromSlice(struct {
+        fileId: []const u8,
+        fileName: []const u8,
+        fileSize: usize,
+        totalChunks: usize,
+        chunkSize: usize,
+    }, allocator, request.sent_body.?, .{});
+    defer response.deinit();
+
+    // Verify session exists in Redis
+    const session = try test_server.redis_client.getSession(response.value.fileId);
+    defer session.deinit();
+
+    try testing.expectEqualStrings("test.txt", session.file_name);
+    try testing.expectEqual(@as(usize, 1000), session.file_size);
+}
