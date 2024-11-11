@@ -136,4 +136,21 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_lib_unit_tests.step);
     test_step.dependOn(&run_exe_unit_tests.step);
+
+    // Create test step
+    const opensearch_tests = b.addTest(.{
+        .root_source_file = b.path("src/service/opensearch/opensearch_helper.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // Link the test executable with libcurl
+    opensearch_tests.linkSystemLibrary("curl");
+    opensearch_tests.linkLibC();
+
+    const run_main_tests = b.addRunArtifact(opensearch_tests);
+
+    // Create a test step that developers can invoke
+    const opensearch_test_step = b.step("opensearch_test", "Run library tests");
+    opensearch_test_step.dependOn(&run_main_tests.step);
 }

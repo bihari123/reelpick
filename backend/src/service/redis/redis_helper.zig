@@ -257,3 +257,109 @@ pub const RedisClient = struct {
         }
     }
 };
+
+// Tests
+const testing = std.testing;
+
+test "UploadSession - initialization" {
+    const allocator = testing.allocator;
+
+    const file_id = "test123";
+    const file_name = "test.txt";
+    const total_size: usize = 1000;
+    const chunk_size: usize = 100;
+
+    var session = try UploadSession.init(allocator, file_id, file_name, total_size, chunk_size);
+    defer session.deinit();
+
+    try testing.expectEqualStrings(file_id, session.file_id);
+    try testing.expectEqualStrings(file_name, session.file_name);
+    try testing.expectEqual(total_size, session.total_size);
+    try testing.expectEqual(chunk_size, session.chunk_size);
+    try testing.expectEqual(@as(usize, 10), session.total_chunks);
+    try testing.expectEqual(@as(usize, 0), session.uploaded_chunks);
+    try testing.expectEqual(@as(usize, 0), session.uploaded_size);
+    try testing.expectEqual(SessionStatus.initializing, session.status);
+
+    // Verify chunk_status initialization
+    for (session.chunk_status) |status| {
+        try testing.expect(!status);
+    }
+}
+
+test "UploadSession - serialization and deserialization" {
+    const allocator = testing.allocator;
+
+    // Create a test session
+    var original = try UploadSession.init(allocator, "test123", "test.txt", 1000, 100);
+    defer original.deinit();
+
+    // Modify some values to test full serialization
+    original.uploaded_chunks = 5;
+    original.uploaded_size = 500;
+    original.chunk_status[0] = true;
+    original.chunk_status[1] = true;
+
+    // Serialize
+    const json = try original.serialize();
+    defer allocator.free(json);
+
+    // Deserialize
+    var deserialized = try UploadSession.deserialize(allocator, json);
+    defer deserialized.deinit();
+
+    // Verify all fields match
+    try testing.expectEqualStrings(original.file_id, deserialized.file_id);
+    try testing.expectEqualStrings(original.file_name, deserialized.file_name);
+    try testing.expectEqual(original.total_size, deserialized.total_size);
+    try testing.expectEqual(original.chunk_size, deserialized.chunk_size);
+    try testing.expectEqual(original.total_chunks, deserialized.total_chunks);
+    try testing.expectEqual(original.uploaded_chunks, deserialized.uploaded_chunks);
+    try testing.expectEqual(original.uploaded_size, deserialized.uploaded_size);
+    try testing.expectEqual(original.status, deserialized.status);
+
+    // Verify chunk status array
+    for (original.chunk_status, 0..) |status, i| {
+        try testing.expectEqual(status, deserialized.chunk_status[i]);
+    }
+}
+
+test "UploadSession - json operations" {
+    const allocator = testing.allocator;
+
+    // Create session
+    var original = try UploadSession.init(allocator, "test123", "test.txt", 1000, 100);
+    defer original.deinit();
+
+    // Test serialization
+    const json = try original.serialize();
+    defer allocator.free(json);
+
+    // Test deserialization
+    var deserialized = try UploadSession.deserialize(allocator, json);
+    defer deserialized.deinit();
+
+    try testing.expectEqualStrings(original.file_id, deserialized.file_id);
+}
+test "UploadSession - full cycle" {
+    const allocator = testing.allocator;
+
+    // Create original session
+    var original = try UploadSession.init(allocator, "test123", "test.txt", 1000, 100);
+    defer original.deinit();
+
+    // Serialize it
+    const json = try original.serialize();
+    defer allocator.free(json);
+
+    // Deserialize back
+    var restored = try UploadSession.deserialize(allocator, json);
+    defer restored.deinit();
+
+    // Verify fields match
+    try testing.expectEqualStrings(original.file_id, restored.file_id);
+    try testing.expectEqualStrings(original.file_name, restored.file_name);
+    try testing.expectEqual(original.total_size, restored.total_size);
+    try testing.expectEqual(original.chunk_size, restored.chunk_size);
+    try testing.expectEqual(original.total_chunks, restored.total_chunks);
+}

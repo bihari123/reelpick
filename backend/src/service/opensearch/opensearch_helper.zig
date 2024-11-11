@@ -2,6 +2,7 @@ const std = @import("std");
 const c = @cImport({
     @cInclude("curl/curl.h");
 });
+const log = std.log;
 
 pub const OpenSearchError = error{
     InitError,
@@ -211,3 +212,131 @@ pub const OpenSearchClient = struct {
         }
     }
 };
+
+// Tests
+
+  
+
+// Updated TestContext and mocks:
+const TestContext = struct {
+    mock_curl_response: []const u8 = "",
+    mock_response_code: c_long = 200,
+    mock_curl_error: c.CURLcode = c.CURLE_OK,
+    write_data: ?*anyopaque = null,
+    write_fn: ?*const fn ([*c]u8, c_uint, c_uint, *anyopaque) callconv(.C) c_uint = null,
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator) TestContext {
+        return .{
+            .allocator = allocator,
+        };
+    }
+};
+
+const test_ctx: TestContext = .{
+    .allocator = undefined,
+};
+
+// Mock CURL functions
+export fn mock_curl_easy_init() ?*c.CURL {
+    return @ptrCast(@alignCast(@as(*anyopaque, @ptrFromInt(0x12345678))));
+}
+
+export fn mock_curl_easy_setopt(curl: *c.CURL, option: c.CURLoption, ptr: *const anyopaque) c.CURLcode {
+    _ = curl;
+    
+    switch (option) {
+        c.CURLOPT_WRITEFUNCTION => {
+            const write_fn = @as(*const fn ([*c]u8, c_uint, c_uint, *anyopaque) callconv(.C) c_uint, @ptrCast(ptr));
+            _ = write_fn;
+        },
+        c.CURLOPT_WRITEDATA => {
+            const write_data = @as(*anyopaque, @constCast(ptr));
+            _ = write_data;
+        },
+        else => {},
+    }
+    
+    return test_ctx.mock_curl_error;
+}
+
+export fn mock_curl_easy_perform(curl: *c.CURL) c.CURLcode {
+    _ = curl;
+    if (test_ctx.mock_curl_error != c.CURLE_OK) {
+        return test_ctx.mock_curl_error;
+    }
+
+    return c.CURLE_OK;
+}
+
+export fn mock_curl_easy_getinfo(curl: *c.CURL, info: c.CURLINFO, data: *c_long) c.CURLcode {
+    _ = curl;
+    _ = info;
+    data.* = test_ctx.mock_response_code;
+    return c.CURLE_OK;
+}
+
+export fn mock_curl_easy_cleanup(curl: *c.CURL) void {
+    _ = curl;
+}
+
+export fn mock_curl_slist_append(list: ?*c.curl_slist, string: [*:0]const u8) ?*c.curl_slist {
+    _ = list;
+    _ = string;
+    return @ptrCast(@alignCast(@as(*anyopaque, @ptrFromInt(0x12345678))));
+}
+
+export fn mock_curl_slist_free_all(list: *c.curl_slist) void {
+    _ = list;
+}
+
+// Test helper functions
+fn createTestClient() !*OpenSearchClient {
+    return try OpenSearchClient.getInstance(std.testing.allocator, "http://localhost:9200");
+}
+
+test "OpenSearchClient - getInstance creates singleton" {
+    const client1 = try createTestClient();
+    defer client1.deinit();
+    
+    const client2 = try OpenSearchClient.getInstance(std.testing.allocator, "http://localhost:9200");
+    try std.testing.expect(client1 == client2);
+}
+
+test "OpenSearchClient - successful search" {
+    const client = try createTestClient();
+    defer client.deinit();
+
+    const query = "{\"query\":{\"match_all\":{}}}";
+    const result = try client.search("test_index", query);
+    defer client.allocator.free(result);
+
+    // We can still verify the operation completed
+    try std.testing.expect(result.len > 0);
+}
+
+test "OpenSearchClient - failed search" {
+    const client = try createTestClient();
+    defer client.deinit();
+
+    const query = "{\"query\":{\"match_all\":{}}}";
+    const result = client.search("random", query);
+    try std.testing.expectError(OpenSearchError.InvalidResponse, result);
+}
+
+test "OpenSearchClient - successful index" {
+    const client = try createTestClient();
+    defer client.deinit();
+
+    const doc = "{\"title\":\"Test Document\"}";
+    try client.index("test_index", "1", doc);
+}
+
+test "OpenSearchClient - failed index" {
+    const client = try createTestClient();
+    defer client.deinit();
+
+    const doc = "{\"title\":\"Test Document\"}";
+    const result = client.index("", "1", doc);
+    try std.testing.expectError(OpenSearchError.InvalidResponse, result);
+}

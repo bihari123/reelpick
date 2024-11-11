@@ -103,6 +103,14 @@ sudo apt-get update && sudo apt-get install libhiredis-dev
 
 ```
 
+## testing 
+go to the /backend dir and run the following commands
+```
+$ zig test src/service/opensearch/opensearch_helper.zig -lc -lcurl
+$ zig test src/service/ffmpeg/ffmpeg_helper.zig 
+$ zig test src/service/redis/redis_helper.zig -I/usr/include -L/usr/lib -lhiredis
+```
+
 ## Build
 
 First run the docker services. Go to each directory of the **/deployment** and run
