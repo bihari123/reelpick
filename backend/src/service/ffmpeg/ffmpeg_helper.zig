@@ -2,6 +2,7 @@ const std = @import("std");
 const process = std.process;
 const fs = std.fs;
 const fmt = std.fmt;
+const testing = std.testing;
 
 pub const VideoError = error{
     FFmpegError,
@@ -129,4 +130,100 @@ pub fn join(allocator: std.mem.Allocator, options: JoinOptions) !void {
         }
         return VideoError.FFmpegError;
     }
+}
+
+// Tests
+test "Duration.fromSeconds correctly converts seconds to Duration" {
+    const test_cases = [_]struct {
+        input: u32,
+        expected: Duration,
+    }{
+        .{ .input = 0, .expected = Duration{ .hours = 0, .minutes = 0, .seconds = 0 } },
+        .{ .input = 45, .expected = Duration{ .hours = 0, .minutes = 0, .seconds = 45 } },
+        .{ .input = 60, .expected = Duration{ .hours = 0, .minutes = 1, .seconds = 0 } },
+        .{ .input = 3661, .expected = Duration{ .hours = 1, .minutes = 1, .seconds = 1 } },
+        .{ .input = 7323, .expected = Duration{ .hours = 2, .minutes = 2, .seconds = 3 } },
+    };
+
+    for (test_cases) |tc| {
+        const result = Duration.fromSeconds(tc.input);
+        try testing.expectEqual(tc.expected.hours, result.hours);
+        try testing.expectEqual(tc.expected.minutes, result.minutes);
+        try testing.expectEqual(tc.expected.seconds, result.seconds);
+    }
+}
+
+test "Duration.format produces correct time string" {
+    const test_cases = [_]struct {
+        input: Duration,
+        expected: []const u8,
+    }{
+        .{ .input = Duration{ .hours = 0, .minutes = 0, .seconds = 0 }, .expected = "00:00:00" },
+        .{ .input = Duration{ .hours = 1, .minutes = 2, .seconds = 3 }, .expected = "01:02:03" },
+        .{ .input = Duration{ .hours = 23, .minutes = 59, .seconds = 59 }, .expected = "23:59:59" },
+    };
+
+    for (test_cases) |tc| {
+        const result = try tc.input.format();
+        try testing.expectEqualStrings(tc.expected, result[0..8]);
+    }
+}
+test "trim function validates input parameters" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const invalid_options = TrimOptions{
+        .input_file = "",
+        .output_file = "",
+        .start = Duration{},
+        .duration = Duration{},
+    };
+
+    // Test with empty input file
+    const trim_result = trim(allocator, invalid_options);
+    try testing.expectError(VideoError.FFmpegError, trim_result);
+}
+test "join function validates minimum input files" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    // Test with single input file (should require at least 2)
+    const invalid_options = JoinOptions{
+        .output_file = "output.mp4",
+        .input_files = &[_][]const u8{"single_file.mp4"},
+    };
+
+    const join_result = join(allocator, invalid_options);
+    try testing.expectError(VideoError.InvalidArguments, join_result);
+}
+test "join function handles valid input parameters" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    // Create temporary test files
+    const test_files = [_][]const u8{ "test1.mp4", "test2.mp4" };
+    for (test_files) |file| {
+        const f = std.fs.cwd().createFile(file, .{}) catch |err| {
+            std.debug.print("Failed to create test file: {}\n", .{err});
+            continue;
+        };
+        f.close();
+    }
+    defer {
+        for (test_files) |file| {
+            std.fs.cwd().deleteFile(file) catch {};
+        }
+    }
+
+    const valid_options = JoinOptions{
+        .output_file = "joined_output.mp4",
+        .input_files = &test_files,
+    };
+
+    // This will fail because the test files are empty, but it tests the parameter validation
+    const join_result = join(allocator, valid_options);
+    try testing.expectError(VideoError.FFmpegError, join_result);
 }
