@@ -130,10 +130,11 @@ go to the /backend and run
 ```
 $ zig build
 $ mkdir agents
-$ cp ./zig-out/bin/reelpick ./agents/reelpick
+$ cp ./zig-out/bin/reelpick ./agents/reelpick1
 $ cd ./agents
-$ ./reelpick
+$ ./reelpick1
 ```
+**NOTE:** The envoy proxy can handle two backend server (port 5000 and 5050). So if you wanna see parallel chunk processing, then change the port in the backend/main.zig from 5050 to 5000 (or vice versa) and repeat the above steps (change `cp ./zig-out/bin/reelpick ./agents/reelpick1` to `cp ./zig-out/bin/reelpick ./agents/reelpick2`) and run `./reelpick2`
 
 go to the /frontend folder (front end only support file upload for now, for join and trim, see the curl request below)
 

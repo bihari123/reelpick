@@ -25,7 +25,7 @@ pub fn main() !void {
     defer server.deinit();
 
     // Start server
-    const port: u16 = 5050;
+    const port: u16 = 5000;
     std.debug.print("Starting file server on port {d}...\n", .{port});
     try server.start(port);
 }
