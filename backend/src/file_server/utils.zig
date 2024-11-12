@@ -26,8 +26,12 @@ pub const UploadError = error{
     InvalidSession,
     Unauthorized,
     RedisError,
+    VideoInfoError,
     TrimError,
+    InvalidDuration,
+    DurationTooLong,
     JoinError,
+    InvalidTrimRange,
 };
 
 // API token validation
@@ -167,6 +171,8 @@ pub fn sendErrorJson(r: zap.Request, err: anyerror, code: u16) void {
         UploadError.InvalidSession => "Invalid session",
         UploadError.Unauthorized => "Unauthorized",
         UploadError.RedisError => "Redis operation failed",
+        UploadError.JoinError => "Join operation failed",
+        UploadError.TrimError => "Trim operation failed",
         else => "Internal server error",
     };
 
@@ -179,4 +185,3 @@ pub fn sendErrorJson(r: zap.Request, err: anyerror, code: u16) void {
 
     r.sendBody(json) catch return;
 }
-

@@ -9,6 +9,8 @@ const server = @import("file_server.zig");
 const utils = @import("utils.zig");
 const video = @import("service/ffmpeg/ffmpeg_helper.zig");
 
+const MAX_DURATION_SECONDS: u32 = 3600; // 1 hour in seconds
+
 pub fn handleTrim(ep: *zap.Endpoint, r: zap.Request) void {
     std.debug.print("insied trim", .{});
     const self: *server.FileServer = @fieldParentPtr("ep_trim", ep);
@@ -37,17 +39,43 @@ pub fn handleTrim(ep: *zap.Endpoint, r: zap.Request) void {
         defer parsed.deinit();
 
         const init_data = parsed.value;
+
+        // Validate duration
+        if (init_data.duration == 0) {
+            utils.sendErrorJson(r, val.UploadError.InvalidDuration, 400);
+            return;
+        }
+
+        if (init_data.duration > MAX_DURATION_SECONDS) {
+            utils.sendErrorJson(r, val.UploadError.DurationTooLong, 400);
+            return;
+        }
+
         var gpa = std.heap.GeneralPurposeAllocator(.{}){};
         defer _ = gpa.deinit();
         const allocator = gpa.allocator();
+
+        // Get video duration first
+        const video_info = video.getVideoInfo(allocator, init_data.fileName) catch {
+            utils.sendErrorJson(r, val.UploadError.VideoInfoError, 400);
+            return;
+        };
+        defer video_info.deinit();
+
+        // Check if start_time + duration exceeds video length
+        if (init_data.start_time + init_data.duration > video_info.duration_seconds) {
+            utils.sendErrorJson(r, val.UploadError.InvalidTrimRange, 400);
+            return;
+        }
+
         video.trim(allocator, .{
             .input_file = init_data.fileName,
-            .start = video.Duration.fromSeconds(init_data.start_time), // start at 1:30
-            .duration = video.Duration.fromSeconds(init_data.duration), // trim for 2:15
+            .start = video.Duration.fromSeconds(init_data.start_time),
+            .duration = video.Duration.fromSeconds(init_data.duration),
             .output_file = init_data.outputFile,
         }) catch {
             std.debug.print("error in trimming", .{});
-            utils.sendErrorJson(r, val.UploadError.TrimError, 400);
+            utils.sendErrorJson(r, val.UploadError.TrimError, 500);
             return;
         };
     } else {

@@ -51,6 +51,12 @@ pub fn handleJoin(ep: *zap.Endpoint, r: zap.Request) void {
 
         const init_data = parsed.value;
 
+        if (init_data.parts.len <= 1) {
+            std.debug.print("Error in joining: Need atleast two files\n", .{});
+            utils.sendErrorJson(r, val.UploadError.JoinError, 400);
+            return;
+        }
+
         // Create a separate allocator for the video processing
         var gpa = std.heap.GeneralPurposeAllocator(.{}){};
         defer _ = gpa.deinit();

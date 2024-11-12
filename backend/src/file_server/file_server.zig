@@ -51,12 +51,10 @@ pub const FileServer = struct {
             .ep_trim = zap.Endpoint.init(.{
                 .path = "/api/video/trim",
                 .post = trim.handleTrim,
-                .options = status.handleOptions,
             }),
             .ep_join = zap.Endpoint.init(.{
                 .path = "/api/video/join",
                 .post = join.handleJoin,
-                .options = status.handleOptions,
             }),
         };
 
