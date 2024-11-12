@@ -11,6 +11,7 @@ pub const VideoError = error{
     MissingOutputFile,
     InvalidDuration,
     FileCreationError,
+    DurationNotFound,
 };
 
 pub const Duration = struct {
@@ -79,6 +80,41 @@ pub fn trim(allocator: std.mem.Allocator, options: TrimOptions) !void {
         }
         return VideoError.FFmpegError;
     }
+}
+
+fn timeToSeconds(time: []const u8) !u32 {
+    // Expected format: HH:MM:SS.ms
+    const hours = try std.fmt.parseFloat(f64, time[0..2]);
+    const minutes = try std.fmt.parseFloat(f64, time[3..5]);
+    const seconds = try std.fmt.parseFloat(f64, time[6..]);
+
+    const total_seconds = (hours * 3600) + (minutes * 60) + seconds;
+    return @intFromFloat(@floor(total_seconds));
+}
+
+pub fn getVideoDuration(allocator: std.mem.Allocator, filename: []const u8) !u32 {
+    var child = std.process.Child.init(&[_][]const u8{
+        "ffmpeg",
+        "-i",
+        filename,
+    }, allocator);
+
+    child.stderr_behavior = .Pipe;
+    child.stdout_behavior = .Pipe;
+
+    try child.spawn();
+
+    const stderr = try child.stderr.?.reader().readAllAlloc(allocator, 10 * 1024 * 1024);
+    defer allocator.free(stderr);
+
+    _ = try child.wait();
+
+    if (std.mem.indexOf(u8, stderr, "Duration: ")) |start| {
+        const duration_str = stderr[start + 10 .. start + 21];
+        return try timeToSeconds(duration_str);
+    }
+
+    return VideoError.DurationNotFound;
 }
 
 /// Joins multiple video files using FFmpeg's concat demuxer

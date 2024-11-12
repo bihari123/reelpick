@@ -114,8 +114,18 @@ $ zig test src/service/redis/redis_helper.zig -I/usr/include -L/usr/lib -lhiredi
 
 $ zig test src/service/sqlite/sqlite_helper.zig -I./third_party/sqlite -lc third_party/sqlite/sqlite3.c -DSQLITE_THREADSAFE=1 -DSQLITE_ENABLE_JSON1 -DSQLITE_ENABLE_RTREE -DSQLITE_ENABLE_FTS5 -DSQLITE_ENABLE_COLUMN_METADATA -DSQLITE_ENABLE_UNLOCK_NOTIFY -DSQLITE_ENABLE_DBSTAT_VTAB -DSQLITE_SECURE_DELETE
 
-
 ```
+
+## E2E testing
+go to each subdirectory of the **/deployment** folder and run 
+```
+$ docker compose up
+``` 
+then go to the **/backend** folder and run 
+```
+zig build test
+``` 
+
 
 ## Build
 
@@ -147,23 +157,23 @@ $ npm  run start
 ## API for trimming and joining
 
 ```
-curl -X POST http://localhost:5050/api/trim \
+# Video Trim Request
+curl -X POST http://localhost:5000/api/video/trim \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer tk_1234567890abcdef" \
   -d '{
-    "fileName": "./uploads/input.mp4",
+    "fileName": "./uploads/sample2.mp4",
     "start_time": 30,
     "duration": 60,
     "outputFile": "output.mp4"
   }'
-```
 
-```
+# Video Join Request
 curl -X POST http://localhost:5000/api/video/join \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer tk_1234567890abcdef" \
   -d '{
-    "parts": ["video1.mp4", "video2.mp4"],
+    "parts": ["../samples/sample1.mp4", "../sample/sample2.mp4"],
     "outputFile": "joined_output.mp4"
   }'
 ```

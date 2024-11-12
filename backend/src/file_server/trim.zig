@@ -56,14 +56,14 @@ pub fn handleTrim(ep: *zap.Endpoint, r: zap.Request) void {
         const allocator = gpa.allocator();
 
         // Get video duration first
-        const video_info = video.getVideoInfo(allocator, init_data.fileName) catch {
+        const video_duration = video.getVideoDuration(allocator, init_data.fileName) catch {
             utils.sendErrorJson(r, val.UploadError.VideoInfoError, 400);
             return;
         };
-        defer video_info.deinit();
+        // defer video_duration.deinit();
 
         // Check if start_time + duration exceeds video length
-        if (init_data.start_time + init_data.duration > video_info.duration_seconds) {
+        if (init_data.start_time + init_data.duration > video_duration) {
             utils.sendErrorJson(r, val.UploadError.InvalidTrimRange, 400);
             return;
         }
