@@ -177,3 +177,26 @@ curl -X POST http://localhost:5000/api/video/join \
     "outputFile": "joined_output.mp4"
   }'
 ```
+
+## Time bound link sharing
+There are two ways of doing that depending upon how seriouly we take security. For a simple and quick implementation, we can use JWT. But JWT can be decoded using online tools, so we don't wanna use them. In some modern books, they even suggest PASETO but keeping our implementation in  mind I think that It would be better to use session tokens with redis, which we are already using for the job tracking across multiple containers here. This way the session data is stored securely at the server and cannot be decoded from the token alone. In this approach, the client sees this 
+```
+eyJhbGciOiJIUzI1NiIs-4Wy8fHw8fDw_example_token
+```
+which is just the key to the following data stored in the redis
+```
+# Example of what's in Redis (only accessible server-side)
+{
+    "session:eyJhbGciOiJIUzI1NiIs-4Wy8fHw8fDw_example_token": {
+        "user_data": {
+            "user_id": "12345",
+            "username": "john_doe",
+            "role": "admin"
+        },
+        "created_at": "2024-11-12T10:00:00",
+        "last_accessed": "2024-11-12T10:30:00",
+        "expiry": 86400
+    }
+}
+```
+I like this approach because this way we don't have a decodable data exposed and we have complete control over the token lifecycle
