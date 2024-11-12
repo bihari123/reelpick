@@ -199,4 +199,4 @@ which is just the key to the following data stored in the redis
     }
 }
 ```
-I like this approach because this way we don't have a decodable data exposed and we have complete control over the token lifecycle
+I like this approach because this way we don't have a decodable data exposed and we have complete control over the token lifecycle, there is no risk of token manipulation and it has no meaning outside redis data. It will also be easier to put a limit on the number of times a token link has been accessed
