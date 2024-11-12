@@ -4,8 +4,8 @@ const zap = @import("zap");
 const Thread = std.Thread;
 const fileserver = @import("./file_server/file_server.zig");
 
-const repo = @import("./file_server/layer/repo/db.zig");
-const opensearch = @import("./service/opensearch/opensearch_helper.zig");
+const repo = @import("./file_server/db.zig");
+const opensearch = @import("./file_server/service/opensearch/opensearch_helper.zig");
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{
         .thread_safe = true,

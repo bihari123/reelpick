@@ -1,4 +1,4 @@
-const sqlite = @import("../../../service/sqlite/sqlite_helper.zig");
+const sqlite = @import("service/sqlite/sqlite_helper.zig");
 const std = @import("std");
 // Create connection pool
 pub var pool: sqlite.ConnectionPool = undefined;

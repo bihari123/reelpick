@@ -1,12 +1,12 @@
 const std = @import("std");
 const zap = @import("zap");
-const redis = @import("../../../service/redis/redis_helper.zig");
-const sqlite = @import("../../../service/sqlite/sqlite_helper.zig");
+const redis = @import("service/redis/redis_helper.zig");
+const sqlite = @import("service/sqlite/sqlite_helper.zig");
 const Thread = std.Thread;
-const val = @import("./utils.zig");
-const repo = @import("../repo/db.zig");
-const server = @import("../../file_server.zig");
-const utils = @import("./utils.zig");
+const val = @import("utils.zig");
+const repo = @import("db.zig");
+const server = @import("file_server.zig");
+const utils = @import("utils.zig");
 pub fn handleStatus(ep: *zap.Endpoint, r: zap.Request) void {
     const self: *server.FileServer = @fieldParentPtr("ep_status", ep);
     utils.addCorsHeaders(r) catch return;

@@ -122,21 +122,9 @@ pub fn build(b: *std.Build) void {
 
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
 
-    const exe_unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
-    const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
-
-    // Similar to creating the run step earlier, this exposes a `test` step to
-    // the `zig build --help` menu, providing a way for the user to request
-    // running the unit tests.
-
     // Create test step
     const opensearch_tests = b.addTest(.{
-        .root_source_file = b.path("src/service/opensearch/opensearch_helper.zig"),
+        .root_source_file = b.path("src/file_server/service/opensearch/opensearch_helper.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -147,13 +135,9 @@ pub fn build(b: *std.Build) void {
 
     const run_opensearch_tests = b.addRunArtifact(opensearch_tests);
 
-    // Create a test step that developers can invoke
-    //const opensearch_test_step = b.step("opensearch_test", "Run library tests");
-    //opensearch_test_step.dependOn(&run_main_tests.step);
-
     //Create the test executable
     const sqlite_test = b.addTest(.{
-        .root_source_file = .{ .cwd_relative = "src/service/sqlite/sqlite_helper.zig" },
+        .root_source_file = .{ .cwd_relative = "src/file_server/service/sqlite/sqlite_helper.zig" },
         .target = target,
         .optimize = optimize,
     });
@@ -166,18 +150,28 @@ pub fn build(b: *std.Build) void {
     sqlite_test.addIncludePath(.{ .cwd_relative = "third_party/sqlite" });
     sqlite_test.linkLibC();
 
-  
     // Create test step
     const run_sqlite_tests = b.addRunArtifact(sqlite_test);
-   
-   
 
+    //Create the test executable
+    const e2e_test = b.addTest(.{
+        .root_source_file = .{ .cwd_relative = "src/file_server/file_server_e2e_test.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+    e2e_test.root_module.addImport("zap", zap.module("zap"));
+    // Link the executable with required libraries
+    e2e_test.linkSystemLibrary("hiredis");
+    e2e_test.linkSystemLibrary("curl");
+    e2e_test.linkLibrary(sqlite);
+    e2e_test.addIncludePath(.{ .cwd_relative = "third_party/sqlite" });
+
+    const run_e2e_test = b.addRunArtifact(e2e_test);
 
     const test_step = b.step("test", "Run the tests");
     test_step.dependOn(&run_sqlite_tests.step);
     test_step.dependOn(&run_lib_unit_tests.step);
-    test_step.dependOn(&run_exe_unit_tests.step);
 
     test_step.dependOn(&run_opensearch_tests.step);
-   // test_step.dependOn(&run_initialize_tests.step);
+    test_step.dependOn(&run_e2e_test.step);
 }

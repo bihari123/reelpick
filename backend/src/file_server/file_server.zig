@@ -1,15 +1,15 @@
 const std = @import("std");
 const zap = @import("zap");
-const redis = @import("../service/redis/redis_helper.zig");
-const sqlite = @import("../service/sqlite/sqlite_helper.zig");
+const redis = @import("service/redis/redis_helper.zig");
+const sqlite = @import("service/sqlite/sqlite_helper.zig");
 const Thread = std.Thread;
-const val = @import("./layer/controller/utils.zig");
-const repo = @import("./layer/repo/db.zig");
-const initialize = @import("./layer/controller/initialize.zig");
-const upload = @import("./layer/controller/upload.zig");
-const status = @import("./layer/controller/status.zig");
-const trim = @import("./layer/controller/trim.zig");
-const join = @import("./layer/controller/join.zig");
+const val = @import("utils.zig");
+const repo = @import("db.zig");
+const initialize = @import("initialize.zig");
+const upload = @import("upload.zig");
+const status = @import("status.zig");
+const trim = @import("trim.zig");
+const join = @import("join.zig");
 pub const FileServer = struct {
     allocator: std.mem.Allocator,
     redis_client: redis.RedisClient,

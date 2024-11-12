@@ -1,13 +1,13 @@
 const std = @import("std");
 const zap = @import("zap");
-const redis = @import("../../../service/redis/redis_helper.zig");
-const sqlite = @import("../../../service/sqlite/sqlite_helper.zig");
+const redis = @import("service/redis/redis_helper.zig");
+const sqlite = @import("service/sqlite/sqlite_helper.zig");
 const Thread = std.Thread;
-const val = @import("./utils.zig");
-const repo = @import("../repo/db.zig");
-const server = @import("../../file_server.zig");
-const utils = @import("./utils.zig");
-const video = @import("../../../service/ffmpeg/ffmpeg_helper.zig");
+const val = @import("utils.zig");
+const repo = @import("db.zig");
+const server = @import("file_server.zig");
+const utils = @import("utils.zig");
+const video = @import("service/ffmpeg/ffmpeg_helper.zig");
 
 pub fn handleTrim(ep: *zap.Endpoint, r: zap.Request) void {
     std.debug.print("insied trim", .{});
