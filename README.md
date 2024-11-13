@@ -230,7 +230,7 @@ https://github.com/user-attachments/assets/70e241b7-c2cd-44e7-bc36-8216a5af1784
 - install ffmpeg `sudo apt update sudo apt install ffmpeg `
 - Envoy proxy : https://github.com/helpfulBadger/envoy_getting_started/tree/master/01_front_proxy
 
-## Parallel uploading
+### Parallel uploading
 
 Key improvements in this implementation:
 
@@ -312,7 +312,7 @@ Key benefits:
 - Improved reliability with retry capability
 - Network efficiency
 
-## Adaptive Chink size file transfer sequence
+### Adaptive Chink size file transfer sequence
 
 We could also have used the adaptive chunk size file transfer.
 I'll create a sequence diagram showing the high-level flow of the adaptive chunk sizing system for file transfers.
