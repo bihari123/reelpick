@@ -103,29 +103,41 @@ sudo apt-get update && sudo apt-get install libhiredis-dev
 
 ```
 
-## Unit testing 
-go to the /backend dir and run the following commands
+## Unit testing
+
+go to each subdirectory of the **/deployment** folder and run
+
 ```
-$ zig test src/service/opensearch/opensearch_helper.zig -lc -lcurl
+$ docker compose up
+```
 
-$ zig test src/service/ffmpeg/ffmpeg_helper.zig 
+then
+go to the /backend dir and run the following commands
 
-$ zig test src/service/redis/redis_helper.zig -I/usr/include -L/usr/lib -lhiredis
+```
+$ zig test src/file_server/service/opensearch/opensearch_helper.zig -lc -lcurl
 
-$ zig test src/service/sqlite/sqlite_helper.zig -I./third_party/sqlite -lc third_party/sqlite/sqlite3.c -DSQLITE_THREADSAFE=1 -DSQLITE_ENABLE_JSON1 -DSQLITE_ENABLE_RTREE -DSQLITE_ENABLE_FTS5 -DSQLITE_ENABLE_COLUMN_METADATA -DSQLITE_ENABLE_UNLOCK_NOTIFY -DSQLITE_ENABLE_DBSTAT_VTAB -DSQLITE_SECURE_DELETE
+$ zig test src/file_server/service/ffmpeg/ffmpeg_helper.zig
+
+$ zig test src/file_server/service/redis/redis_helper.zig -I/usr/include -L/usr/lib -lhiredis
+
+$ zig test src/file_server/service/sqlite/sqlite_helper.zig -I./third_party/sqlite -lc third_party/sqlite/sqlite3.c -DSQLITE_THREADSAFE=1 -DSQLITE_ENABLE_JSON1 -DSQLITE_ENABLE_RTREE -DSQLITE_ENABLE_FTS5 -DSQLITE_ENABLE_COLUMN_METADATA -DSQLITE_ENABLE_UNLOCK_NOTIFY -DSQLITE_ENABLE_DBSTAT_VTAB -DSQLITE_SECURE_DELETE
 
 ```
 
 ## E2E testing
-go to each subdirectory of the **/deployment** folder and run 
+
+go to each subdirectory of the **/deployment** folder and run
+
 ```
 $ docker compose up
-``` 
-then go to the **/backend** folder and run 
+```
+
+then go to the **/backend** folder and run
+
 ```
 zig build test
-``` 
-
+```
 
 ## Build
 
@@ -144,6 +156,7 @@ $ cp ./zig-out/bin/reelpick ./agents/reelpick1
 $ cd ./agents
 $ ./reelpick1
 ```
+
 **NOTE:** The envoy proxy can handle upto two backend server (port 5000 and 5050). So if you wanna see parallel chunk processing, then change the port in the backend/main.zig from 5050 to 5000 (or vice versa) and repeat the above steps (change `cp ./zig-out/bin/reelpick ./agents/reelpick1` to `cp ./zig-out/bin/reelpick ./agents/reelpick2`) and run `./reelpick2`
 
 go to the /frontend folder (front end only support file upload for now, for join and trim, see the curl request below)
@@ -179,11 +192,15 @@ curl -X POST http://localhost:5000/api/video/join \
 ```
 
 ## Time bound link sharing
-There are two ways of doing that depending upon how seriouly we take security. For a simple and quick implementation, we can use JWT. But JWT can be decoded using online tools, so we don't wanna use them. In some modern books, they even suggest PASETO but keeping our implementation in  mind I think that It would be better to use session tokens with redis, which we are already using for the job tracking across multiple containers here. This way the session data is stored securely at the server and cannot be decoded from the token alone. In this approach, the client sees this 
+
+There are two ways of doing that depending upon how seriouly we take security. For a simple and quick implementation, we can use JWT. But JWT can be decoded using online tools, so we don't wanna use them. In some modern books, they even suggest PASETO but keeping our implementation in mind I think that It would be better to use session tokens with redis, which we are already using for the job tracking across multiple containers here. This way the session data is stored securely at the server and cannot be decoded from the token alone. In this approach, the client sees this
+
 ```
 eyJhbGciOiJIUzI1NiIs-4Wy8fHw8fDw_example_token
 ```
+
 which is just the key to the following data stored in the redis
+
 ```
 # Example of what's in Redis (only accessible server-side)
 {
@@ -199,10 +216,9 @@ which is just the key to the following data stored in the redis
     }
 }
 ```
+
 I like this approach because this way we don't have a decodable data exposed and we have complete control over the token lifecycle, there is no risk of token manipulation and it has no meaning outside redis data. It will also be easier to put a limit on the number of times a token link has been accessed
 
 ## Video demo
 
 https://github.com/user-attachments/assets/70e241b7-c2cd-44e7-bc36-8216a5af1784
-
-
