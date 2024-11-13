@@ -247,5 +247,130 @@ Key improvements in this implementation:
    - Chunks are stored individually and reassembled after verification
    - Failed chunks can be retried without affecting others
 4. **Data Integrity**:
+
    - Chunks are verified using SHA-256 hashes
    - Final file verification ensures all chunks were received correctly
+
+   ## Chunk based upload using multipart protocol
+
+   ![[chunk-based-upload-using-mulipart-protocol.png]]Let me explain how chunk-based multipart uploads work at a high level.
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+
+    C->>S: 1. Initiate multipart upload
+    S-->>C: Return upload ID
+
+    par Chunk Upload
+        C->>S: Upload Part 1
+        C->>S: Upload Part 2
+        C->>S: Upload Part 3
+    end
+
+    S-->>C: Return ETag for each part
+
+    Note over C,S: Client keeps track of<br/>part numbers and ETags
+
+    C->>S: Complete upload (send list of parts)
+    S->>S: Combine all parts
+    S-->>C: Upload complete
+
+```
+
+Here's how multipart uploads work:
+
+1. Initialization
+
+   - Client initiates the multipart upload
+   - Server returns a unique upload ID
+
+2. Splitting and Uploading
+
+   - Large file is split into smaller chunks locally
+   - Each chunk becomes a "part" with a number (1, 2, 3, etc.)
+   - Parts can be uploaded in parallel
+   - Each successful part upload returns an ETag (identifier)
+
+3. Tracking
+
+   - Client maintains a list of uploaded parts
+   - Each part is identified by its part number and ETag
+   - Failed parts can be retried individually
+
+4. Completion
+   - After all parts are uploaded, client sends a completion request
+   - Request includes the list of all parts in order
+   - Server validates and combines all parts into the final file
+
+Key benefits:
+
+- Resume-able uploads
+- Parallel uploads for better performance
+- Better handling of large files
+- Improved reliability with retry capability
+- Network efficiency
+
+## Adaptive Chink size file transfer sequence
+
+We could also have used the adaptive chunk size file transfer.
+I'll create a sequence diagram showing the high-level flow of the adaptive chunk sizing system for file transfers.
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+
+    Note over C,S: Initial Connection
+    C->>S: Connect
+    C->>S: Send File Metadata (name, size)
+
+    Note over C,S: Transfer Loop
+    rect rgb(240, 240, 240)
+        Note over C: Read chunk based on<br/>current chunk size
+        C->>S: Send Chunk Metadata
+        C->>S: Send Chunk Data
+
+        Note over S: Measure transfer<br/>performance
+        S->>C: Send Feedback (rate, buffer status)
+
+        Note over C: Adjust chunk size based on:<br/>1. Transfer rate<br/>2. Buffer status<br/>3. Target performance
+    end
+
+    Note over C,S: Loop continues until file complete
+
+    C->>S: Transfer Complete
+
+    Note over S: Save and close file
+
+```
+
+Let me break down the key components:
+
+1. **Initial Setup**
+
+   - Client connects to server
+   - Sends file metadata (name, total size)
+
+2. **Transfer Loop**
+   Each iteration involves:
+
+   - Client reads a chunk based on current chunk size
+   - Sends chunk metadata + data
+   - Server measures performance
+   - Server sends feedback
+   - Client adjusts chunk size for next iteration
+
+3. **Adaptive Logic**
+   Chunk size adjusts based on:
+
+   - Transfer rate vs target rate
+   - Server buffer status
+   - Network conditions
+
+4. **Completion**
+   - Transfer continues until file is complete
+   - Server saves and closes file
+
+The adaptive nature comes from the continuous feedback loop during transfer, allowing the system to optimize chunk sizes in real-time based on current conditions.
