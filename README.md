@@ -222,3 +222,30 @@ I like this approach because this way we don't have a decodable data exposed and
 ## Video demo
 
 https://github.com/user-attachments/assets/70e241b7-c2cd-44e7-bc36-8216a5af1784
+
+## Extras
+
+- link to download the old football videos: https://footballia.net/
+- extend your c/c++ project with zig :https://zig.news/kristoff/extend-a-c-c-project-with-zig-55di
+- install ffmpeg `sudo apt update sudo apt install ffmpeg `
+- Envoy proxy : https://github.com/helpfulBadger/envoy_getting_started/tree/master/01_front_proxy
+
+## Parallel uploading
+
+Key improvements in this implementation:
+
+1. **True Parallel Processing**:
+   - Multiple chunks of the same file are uploaded simultaneously
+   - Each chunk can be processed by a different backend server
+   - Chunk integrity is verified using hashes
+2. **Distributed State Management**:
+   - Uses Redis to store upload session data
+   - All servers can access the same session information
+   - Progress tracking is synchronized across servers
+3. **Chunk Management**:
+   - Each chunk has its own metadata including hash and size
+   - Chunks are stored individually and reassembled after verification
+   - Failed chunks can be retried without affecting others
+4. **Data Integrity**:
+   - Chunks are verified using SHA-256 hashes
+   - Final file verification ensures all chunks were received correctly
