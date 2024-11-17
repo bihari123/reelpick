@@ -215,8 +215,6 @@ pub const OpenSearchClient = struct {
 
 // Tests
 
-  
-
 // Updated TestContext and mocks:
 const TestContext = struct {
     mock_curl_response: []const u8 = "",
@@ -244,7 +242,7 @@ export fn mock_curl_easy_init() ?*c.CURL {
 
 export fn mock_curl_easy_setopt(curl: *c.CURL, option: c.CURLoption, ptr: *const anyopaque) c.CURLcode {
     _ = curl;
-    
+
     switch (option) {
         c.CURLOPT_WRITEFUNCTION => {
             const write_fn = @as(*const fn ([*c]u8, c_uint, c_uint, *anyopaque) callconv(.C) c_uint, @ptrCast(ptr));
@@ -256,7 +254,7 @@ export fn mock_curl_easy_setopt(curl: *c.CURL, option: c.CURLoption, ptr: *const
         },
         else => {},
     }
-    
+
     return test_ctx.mock_curl_error;
 }
 
@@ -298,21 +296,9 @@ fn createTestClient() !*OpenSearchClient {
 test "OpenSearchClient - getInstance creates singleton" {
     const client1 = try createTestClient();
     defer client1.deinit();
-    
+
     const client2 = try OpenSearchClient.getInstance(std.testing.allocator, "http://localhost:9200");
     try std.testing.expect(client1 == client2);
-}
-
-test "OpenSearchClient - successful search" {
-    const client = try createTestClient();
-    defer client.deinit();
-
-    const query = "{\"query\":{\"match_all\":{}}}";
-    const result = try client.search("test_index", query);
-    defer client.allocator.free(result);
-
-    // We can still verify the operation completed
-    try std.testing.expect(result.len > 0);
 }
 
 test "OpenSearchClient - failed search" {
@@ -330,6 +316,17 @@ test "OpenSearchClient - successful index" {
 
     const doc = "{\"title\":\"Test Document\"}";
     try client.index("test_index", "1", doc);
+}
+test "OpenSearchClient - successful search" {
+    const client = try createTestClient();
+    defer client.deinit();
+
+    const query = "{\"query\":{\"match_all\":{}}}";
+    const result = try client.search("test_index", query);
+    defer client.allocator.free(result);
+
+    // We can still verify the operation completed
+    try std.testing.expect(result.len > 0);
 }
 
 test "OpenSearchClient - failed index" {
