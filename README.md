@@ -99,7 +99,7 @@ error: expected command argument
 ## Install dependencies
 
 ```
-sudo apt-get update && sudo apt-get install libhiredis-dev
+sudo apt-get update && sudo apt-get install libhiredis-dev ffmpeg 
 
 ```
 
